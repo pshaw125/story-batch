@@ -157,3 +157,7 @@ fastlane/test_output
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/typescript.yml
+
+# Reviewed native-renderer configuration examples only.
+!/typescript/renderer.example.json
+!/typescript/comfyui.example.json

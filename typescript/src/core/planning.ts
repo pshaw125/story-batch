@@ -5,6 +5,7 @@ export interface RunContext {
   id: string; createdAt: string;
   os: { name: string; version: string; arch: string };
   framework: { name: string; version: string };
+  rendererOs?: { name: string; version: string; arch: string };
   hardware: string; driver: string; computeRuntime: string; applicationVersion: string;
 }
 export interface ImageJob {

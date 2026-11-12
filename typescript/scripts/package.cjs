@@ -10,7 +10,7 @@ const { tmpdir } = require('node:os');
     const p = require('../package.json');
     await writeFile(join(staging,'package.json'), JSON.stringify({name:p.name,version:p.version,main:p.main,dependencies:p.dependencies}));
     await mkdir(join(staging,'node_modules'), {recursive:true});
-    await cp(join(__dirname,'../node_modules/decimal.js'), join(staging,'node_modules/decimal.js'), {recursive:true});
+    for(const name of Object.keys(p.dependencies)) await cp(join(__dirname,'../node_modules',name), join(staging,'node_modules',name), {recursive:true});
     const paths = await packager({dir:staging,name:'Story Batch TypeScript Spike',out:join(__dirname,'../artifacts'),
       platform:process.platform,arch:process.arch,electronVersion:require('electron/package.json').version,overwrite:true,
       appBundleId:'local.storybatch.typescript.spike',asar:true,prune:false});

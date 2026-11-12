@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "backend": "draw-things",
+  "executablePath": "/absolute/path/to/draw-things-cli"
+}

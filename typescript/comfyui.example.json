@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "backend": "comfyui",
+  "baseUrl": "http://127.0.0.1:8188",
+  "dedicated": true
+}

@@ -3,7 +3,7 @@ export interface Asset { id: string; precision: string; revision: string; hash: 
 export interface LoRA { asset: Asset; modelWeight: number; encoderWeight: number | null }
 interface RecipeBase { model: Asset; loras: LoRA[]; guidance: number }
 export interface DrawThingsRecipe extends RecipeBase {
-  backend: 'draw-things'; sampler: number; seedMode: number; resolutionDependentShift: false;
+  backend: 'draw-things'; negativePrompt?: string; sampler: number; seedMode: number; resolutionDependentShift: false;
 }
 export interface ComfyRecipe extends RecipeBase {
   backend: 'comfyui'; sampler: string; scheduler: string; noisePolicy: 'native';
@@ -13,7 +13,7 @@ export interface ComfyRecipe extends RecipeBase {
 export type NativeRecipe = DrawThingsRecipe | ComfyRecipe;
 export const unknownAsset = (id: string, precision = 'unknown'): Asset => ({ id, precision, revision: 'unknown', hash: 'unknown' });
 export function drawThingsPreset(): DrawThingsRecipe {
-  return { backend: 'draw-things', model: unknownAsset('z_image_turbo_1.0_q6p.ckpt', 'q6p'), sampler: 17, seedMode: 2, guidance: 1, resolutionDependentShift: false, loras: [] };
+  return { backend: 'draw-things', negativePrompt: '', model: unknownAsset('z_image_turbo_1.0_q6p.ckpt', 'q6p'), sampler: 17, seedMode: 2, guidance: 1, resolutionDependentShift: false, loras: [] };
 }
 export function validateRecipe(recipe: NativeRecipe): void {
   const asset = (a: Asset) => { requireThat(a && [a.id, a.precision, a.revision, a.hash].every(s => typeof s === 'string' && s.trim()), 'Assets need identity and explicit precision/revision/hash (or unknown).'); };
@@ -22,6 +22,7 @@ export function validateRecipe(recipe: NativeRecipe): void {
   requireThat(Array.isArray(recipe.loras), 'LoRAs must be a list.');
   for (const lora of recipe.loras) { asset(lora.asset); requireThat(Number.isFinite(lora.modelWeight) && (lora.encoderWeight === null || Number.isFinite(lora.encoderWeight)), 'Invalid LoRA weights.'); }
   if (recipe.backend === 'draw-things') {
+    requireThat(recipe.negativePrompt===undefined||typeof recipe.negativePrompt==='string','Invalid negative prompt.');
     requireThat(Number.isSafeInteger(recipe.sampler) && recipe.sampler >= 0 && Number.isSafeInteger(recipe.seedMode) && recipe.seedMode >= 0, 'Invalid Draw Things native settings.');
     requireThat(recipe.resolutionDependentShift === false, 'Automatic shift is unsupported by this baseline.');
   } else {

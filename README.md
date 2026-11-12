@@ -4,7 +4,7 @@ A native macOS app for sequential, fully offline image batches through **Draw Th
 
 This repository contains the application, tests and documentation. Personal prompts, fields, batches, reference images, model/LoRA weights, renderer paths, build products and experiment archives stay local and are ignored by Git.
 
-The [TypeScript migration spike](typescript/README.md) now contains the shared core and Electron host tests. It uses synthetic outputs only; Windows verification and real renderer integration remain pending.
+The [TypeScript migration spike](typescript/README.md) now contains the shared core and Electron host tests. The Electron window uses synthetic outputs; native Draw Things/ComfyUI adapters now have a separate test CLI. Mac native image/cancellation/offline checks pass; Windows/ComfyUI native verification remains pending.
 
 ## Build and run (macOS)
 
@@ -47,6 +47,7 @@ The root `.gitignore` includes only approved source directories/files and also e
 - [Illustration experiment process and historical findings](app/docs/illustration-process.md)
 - [TypeScript migration plan](app/docs/typescript-migration-plan.md)
 - [Phase 1 progress and remaining gates](app/docs/typescript-phase-1.md)
+- [Phase 2 adapters and remaining gates](app/docs/typescript-phase-2.md)
 - [Draw Things / ComfyUI parameter compatibility](app/docs/renderer-compatibility.md)
 
 The working Swift application remains macOS-specific. The TypeScript core/host spike is separate and has been exercised on Mac; actual Windows execution and ComfyUI integration are still pending. This checkout does **not yet provide a Windows image-generation app**.

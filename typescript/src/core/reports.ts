@@ -2,8 +2,8 @@ import { FrozenBatch, ImageJob, RunContext, validateContext } from './planning';
 import { validateRecipe } from './recipes';
 import { shiftValue } from './arithmetic';
 import { requireThat } from './errors';
-import { JobStatus } from './renderer';
-export interface ImageRecord { jobId: string; status: JobStatus; attempts: number; elapsedMs: number | null; output: string | null; error: string | null }
+import { JobStatus, NativeObservations } from './renderer';
+export interface ImageRecord { observations?: NativeObservations; cached?: boolean; rendererElapsedMs?: number; effectiveJob?: ImageJob; jobId: string; status: JobStatus; attempts: number; elapsedMs: number | null; output: string | null; error: string | null }
 export interface BatchReport { schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
 export function validateJob(job: ImageJob): void {
   requireThat(job?.schemaVersion === 1 && [job.id, job.batchId, job.runId, job.title, job.filename].every(v => typeof v === 'string' && v.trim()), 'Invalid image identity.');
@@ -40,6 +40,9 @@ export function validateReport(value: BatchReport): void {
     requireThat(r.output === null || r.output === job.filename, 'Output differs from planned filename.');
     requireThat(r.error === null || typeof r.error === 'string', 'Invalid record error.');
     requireThat(r.status !== 'completed' || r.output === job.filename, 'Completed image needs an output identity.');
+    if(r.effectiveJob!==undefined){validateJob(r.effectiveJob);requireThat(JSON.stringify(r.effectiveJob)===JSON.stringify(job),'Applied recipe differs from frozen job.');}
+    requireThat(r.cached===undefined||typeof r.cached==='boolean','Invalid cache flag.');
+    requireThat(r.rendererElapsedMs===undefined||Number.isFinite(r.rendererElapsedMs)&&r.rendererElapsedMs>=0,'Invalid renderer timing.');
   }
 }
 export function appendRound(report: BatchReport, round: FrozenBatch): BatchReport {
