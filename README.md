@@ -43,5 +43,7 @@ The root `.gitignore` includes only approved source directories/files and also e
 - [Aspect sizing](app/docs/aspect-sizing.md)
 - [Implementation and verification](app/docs/implementation.md)
 - [Illustration experiment process and historical findings](app/docs/illustration-process.md)
+- [TypeScript migration plan](app/docs/typescript-migration-plan.md)
+- [Draw Things / ComfyUI parameter compatibility](app/docs/renderer-compatibility.md)
 
 The UI, build scripts and process termination are currently macOS-specific. The renderer recipe is separate from app state, but a Windows UI/backend/CLI integration still needs design and implementation. This checkout is **not yet Windows-compatible**.

@@ -9,3 +9,5 @@ Draw Things is the current renderer boundary. Keep executable discovery/local co
 Future Windows work should separate macOS UI/windowing, process lifecycle and renderer availability behind explicit platform boundaries. Do not claim that a model, adapter or sampler is portable merely because its settings can be serialized.
 
 Before proposing a commit, inspect `git status --short --untracked-files=all`, `git diff`, and the complete eligible file list (`git ls-files --cached --others --exclude-standard`). Check for personal paths, credentials, media, model weights and unintended prompt data. Never bypass the ignore rules to include local assets. Publish only after review of the concrete candidate contents.
+
+The [TypeScript migration plan](app/docs/typescript-migration-plan.md) defines the proposed phased replacement and offline/data-preservation gates. The [renderer compatibility decision](app/docs/renderer-compatibility.md) permits native backend differences while requiring OS/framework provenance. These plans do not change the shipped macOS build or authorize implicit downloads.
