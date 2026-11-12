@@ -1,10 +1,13 @@
 import {copyFile,mkdir,readFile,rename,writeFile,rm,constants} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {validateCanvasSelection} from '../core/reports';
+import {validateRecipe,drawThingsPreset} from '../core/recipes';
 import type {DraftSnapshot} from '../core/desktop';
 export const emptyDraft=():DraftSnapshot=>({source:'count=4; steps=3; aspect=1:1\n',lastBatch:null,scope:'images',sort:'seeded'});
 export function validateDraft(value:DraftSnapshot):void{
   if(!value||typeof value.source!=='string'||Buffer.byteLength(value.source)>2_000_000||value.lastBatch!==null&&typeof value.lastBatch!=='string'||!['images','shortlist','favorites','rejected'].includes(value.scope)||!['seeded','seeded-step','newest'].includes(value.sort))throw new Error('Invalid saved draft.');
+  if(value.tools){if(!['draw-things','comfyui'].includes(value.tools.backend))throw new Error('Invalid draft renderer tools.');validateRecipe({...drawThingsPreset(),loras:value.tools.loras});if(value.tools.canvas!==null)validateCanvasSelection(value.tools.canvas);}
 }
 export class DraftStore {
   private current=emptyDraft();private tail:Promise<void>=Promise.resolve();private timer:NodeJS.Timeout|null=null;private invalid=false;

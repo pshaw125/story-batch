@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { FrozenBatch, ImageJob, safeTitle } from '../core/planning';
 import { appendRound, BatchReport, ImageRecord, validateReport, validateJob } from '../core/reports';
 export { BatchReport, appendRound } from '../core/reports';
+import {readCanvas,digest} from './canvas';
 import { deepFreeze, requireThat } from '../core/errors';
 /** One owner per store. All updates read inside the writer queue so an active
  * image cannot overwrite a round appended while it was rendering. */
@@ -19,7 +20,7 @@ export class ReportStore {
     try{await access(join(root,batch.id));throw new Error('Batch identity already exists.');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     const stamp=new Date(batch.createdAt).toISOString().replace(/[:.]/g,'-');
     const folder=join(root,`${stamp}_${safeTitle(batch.title,80)}_${batch.id}`);await mkdir(folder);
-    const store = new ReportStore(folder); await store.save(report); return store;
+    const store = new ReportStore(folder); await store.save(report);await store.archiveInputs(batch.jobs); return store;
   }
   static open(folder: string): ReportStore { return new ReportStore(folder); }
   private async read(): Promise<BatchReport> {
@@ -48,8 +49,8 @@ export class ReportStore {
     this.tail = next.catch(() => {}); return next;
   }
   save(report: BatchReport): Promise<void> { const snapshot = structuredClone(report); return this.change(() => snapshot); }
-  append(round: FrozenBatch, updateEditorSource = true): Promise<void> {
-    return this.change(previous => { requireThat(previous, 'Batch report is missing.'); return appendRound(previous, round, updateEditorSource); });
+  async append(round: FrozenBatch, updateEditorSource = true): Promise<void> {
+    await this.change(previous => { requireThat(previous, 'Batch report is missing.'); return appendRound(previous, round, updateEditorSource); });await this.archiveInputs(round.jobs);
   }
   updateRecords(records: readonly ImageRecord[]): Promise<void> {
     const snapshots = structuredClone(records);
@@ -59,6 +60,7 @@ export class ReportStore {
       return previous;
     });
   }
+  private async archiveInputs(jobs:readonly ImageJob[]):Promise<void>{const assets=new Map(jobs.flatMap(j=>j.input?[j.input.asset,j.input.original]:[]).map(a=>[a.hash,a]));if(!assets.size)return;await mkdir(join(this.folder,'inputs'),{recursive:true});for(const asset of assets.values()){const bytes=await readCanvas(asset),file=join(this.folder,'inputs',asset.hash+'.png');try{await writeFile(file,bytes,{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;if(digest(await readFile(file))!==asset.hash)throw new Error('Archived canvas changed; refusing to overwrite.');}}}
   async claim(id:string):Promise<ImageRecord>{
     let claimed:ImageRecord|undefined;
     await this.change(previous=>{

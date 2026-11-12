@@ -4,7 +4,7 @@ Story Batch generates sequential, fully offline image batches through local rend
 
 This repository contains the application, tests and documentation. Personal prompts, fields, batches, reference images, model/LoRA weights, renderer paths, build products and experiment archives stay local and are ignored by Git.
 
-The [TypeScript desktop application](typescript/README.md) provides shared editing/search, frozen batches, editable queues, image inspection and collections with Draw Things/ComfyUI adapters. Mac native/UI checks pass; Windows workhorse verification remains pending. The Swift application below remains the reference and fallback.
+The [TypeScript desktop application](typescript/README.md) provides shared editing/search, frozen batches, editable queues, image inspection, collections, Swift batch import, image-to-image and native LoRAs with Draw Things/ComfyUI adapters. Mac native/UI checks pass; Windows workhorse verification remains pending. The Swift application below remains the reference and fallback.
 
 ## Build and run (macOS)
 
@@ -50,6 +50,7 @@ The root `.gitignore` includes only approved source directories/files and also e
 - [Phase 2 adapters and remaining gates](app/docs/typescript-phase-2.md)
 - [Phase 3 desktop UI and Windows acceptance](app/docs/typescript-phase-3.md)
 - [Phase 4 daily iteration and collections](app/docs/typescript-phase-4.md)
+- [Phase 5 import and render tools](app/docs/typescript-phase-5.md)
 - [Draw Things / ComfyUI parameter compatibility](app/docs/renderer-compatibility.md)
 
 The working Swift application remains macOS-specific. The TypeScript desktop implementation supports a local ComfyUI adapter, with Windows native-render and workhorse acceptance pending. Mac checks cannot establish Windows GPU/runtime compatibility.

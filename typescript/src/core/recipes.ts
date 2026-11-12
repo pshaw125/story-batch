@@ -1,6 +1,6 @@
 import { requireThat } from './errors';
 export interface Asset { id: string; precision: string; revision: string; hash: string }
-export interface LoRA { asset: Asset; modelWeight: number; encoderWeight: number | null }
+export interface LoRA { nativeVersion?:string; asset: Asset; modelWeight: number; encoderWeight: number | null }
 interface RecipeBase { model: Asset; loras: LoRA[]; guidance: number }
 export interface DrawThingsRecipe extends RecipeBase {
   backend: 'draw-things'; negativePrompt?: string; sampler: number; seedMode: number; resolutionDependentShift: false;
@@ -19,8 +19,8 @@ export function validateRecipe(recipe: NativeRecipe): void {
   const asset = (a: Asset) => { requireThat(a && [a.id, a.precision, a.revision, a.hash].every(s => typeof s === 'string' && s.trim()), 'Assets need identity and explicit precision/revision/hash (or unknown).'); };
   asset(recipe.model);
   requireThat(Number.isFinite(recipe.guidance) && recipe.guidance >= 0, 'Guidance must be finite and nonnegative.');
-  requireThat(Array.isArray(recipe.loras), 'LoRAs must be a list.');
-  for (const lora of recipe.loras) { asset(lora.asset); requireThat(Number.isFinite(lora.modelWeight) && (lora.encoderWeight === null || Number.isFinite(lora.encoderWeight)), 'Invalid LoRA weights.'); }
+  requireThat(Array.isArray(recipe.loras)&&recipe.loras.length<=64, 'LoRAs must be a list.');
+  for (const lora of recipe.loras) { asset(lora.asset); requireThat(Number.isFinite(lora.modelWeight) && (lora.encoderWeight === null || Number.isFinite(lora.encoderWeight)), 'Invalid LoRA weights.'); requireThat(lora.nativeVersion===undefined||typeof lora.nativeVersion==='string'&&!!lora.nativeVersion.trim(),'Invalid native LoRA version.'); }
   if (recipe.backend === 'draw-things') {
     requireThat(recipe.negativePrompt===undefined||typeof recipe.negativePrompt==='string','Invalid negative prompt.');
     requireThat(Number.isSafeInteger(recipe.sampler) && recipe.sampler >= 0 && Number.isSafeInteger(recipe.seedMode) && recipe.seedMode >= 0, 'Invalid Draw Things native settings.');

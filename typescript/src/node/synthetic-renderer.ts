@@ -1,15 +1,16 @@
 import { PNG } from 'pngjs';
 import { ImageJob } from '../core/planning';
 import { validateJob } from '../core/reports';
-import { Capabilities, RenderError } from '../core/renderer';
+import { Capabilities } from '../core/renderer';
+import {validateInput} from './canvas';
 import { validateOutputSize } from './png';
 import { Adapter, Entry } from './renderers/base';
 /** Explicit test renderer. Produces dimension-correct color swatches, never model output. */
 export class SyntheticRenderer extends Adapter {
-  readonly capabilities: Capabilities = { backend:'fake',textToImage:true,imageToImage:false,loras:false,cancellation:true,progress:true,nativeControls:['seed','shift','steps','dimensions'] };
+  readonly capabilities: Capabilities = { backend:'fake',textToImage:true,imageToImage:true,loras:true,cancellation:true,progress:true,nativeControls:['seed','shift','steps','dimensions'] };
   private timers = new Map<string, NodeJS.Timeout>();
   constructor(private tickMs = 100) { super(); }
-  async validate(job: ImageJob): Promise<void> { validateJob(job); validateOutputSize(job.width,job.height); if(job.recipe.loras.length) throw new RenderError('Synthetic tests do not support LoRAs.','validation'); }
+  async validate(job: ImageJob): Promise<void> { validateJob(job); validateOutputSize(job.width,job.height); await validateInput(job); }
   protected async launch(e: Entry): Promise<void> {
     this.transition(e,'running'); let step=0;
     const timer=setInterval(()=>{

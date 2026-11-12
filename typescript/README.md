@@ -1,6 +1,6 @@
 # Story Batch desktop
 
-Story Batch generates sequential offline image batches from metaprompts. The TypeScript/Electron application provides separate parameter, prompt and field editors, a frozen queue, image inspection and step/shift variants. Draw Things CLI serves macOS; a dedicated local ComfyUI service serves Windows. The working Swift application remains available in `../app` with separate data.
+Story Batch generates sequential offline image batches from metaprompts. The TypeScript/Electron application provides separate parameter, prompt and field editors, a frozen queue, image inspection, collections, image-to-image and native LoRAs. Draw Things CLI serves macOS; a dedicated local ComfyUI service serves Windows. The working Swift application remains available in `../app` with separate data.
 
 Mac desktop/native-render checks pass. Windows native image quality, GPU compatibility, offline rendering and workhorse acceptance require verification on Windows; see [Phase 3 evidence](../app/docs/typescript-phase-3.md) and [Phase 4 evidence](../app/docs/typescript-phase-4.md).
 
@@ -30,7 +30,7 @@ Choose **Renderer configuration…** and select a local config file based on `re
 - **Stop Batch** cancels the current owned image and clears waiting requests while preserving completed files. Renderer validation/cancellation is not retried. Confirmed render failure gets one retry; persistent failure stops waiting work. Uncertain API work requires reconciliation before new submission.
 - **Stop After Current** clears waiting images and lets the current image finish. **Queue** has per-image Up/Down/⏭ Run Next/Cancel controls and **Skip current**. Moves preserve frozen seed/shift/prompt pairing and reserved filenames. Skipping cancels only the current owned image; uncertain cancellation still requires reconciliation. Explicitly queueing more after Stop After Current adds new work.
 - **Collect Seeds / Collect Shifts** replace the corresponding header value with completed images from the most recently executed logical request, in actual execution order. Canceled/failed images are excluded; a viewer variant is its own one-image request. Collection does not change `count`: align it with the collected list before queueing a partially completed or differently sized request.
-- **Open batch…** loads a TypeScript report and its latest queued editor source. It displays saved images without resuming old work. Viewer variants retain their source's recipe and do not replace the latest editor source. Swift batch import is a later migration phase.
+- **Open batch…** loads a TypeScript report and its latest queued editor source. It displays saved images without resuming old work. Viewer variants retain their source's recipe and do not replace the latest editor source. Swift reports/collections are copied through **Import Swift…**.
 
 **Preview / Images / Activity / Queue / Shortlist / Favorites / Rejected** provide resolved inputs, fitted image cards/running placeholders, queued seed/shift/step/dimension summaries, and completion filenames/timings. The bottom progress row includes active seed, shift and steps. Numbers reserve their place when queued, including canceled images. **Seeded** sorts by seed → shift → steps; **Seeded-Step** by seed → steps → shift; **Newest** puts recently finished images first. Sorting is shared by the gallery and viewer; changing it keeps the selected image visible and updates its index. Execution order is recorded separately.
 
@@ -39,6 +39,18 @@ Click a completed image to inspect it. The viewer fits the image without stretch
 The 📌 **Shortlist**, ⭐ **Favorite**, and 🚫 **Reject** image actions have hover descriptions. Shortlist and rejection are independent batch flags. Rejection hides an image from Images without deleting its file or recipe; Rejected has a Restore action. Shortlist/Favorites/Rejected are separate views with scoped, nonwrapping viewer navigation. Removing the viewed item chooses the next image, or the previous one at the end. Variants queued from Shortlist are shortlisted immediately, including their running placeholders.
 
 **Favorites** reads the selected output root's `_favorites/` directory. Favoriting copies the image plus a recipe/provenance sidecar. Startup, entering the view, or **Refresh Favorites** rescans the directory; external image additions/removals are supported. Sidecar hashes must match the copied artwork. Files without usable sidecars show unknown parameters and have no recipe/variant controls. A cross-batch favorite offers **Open source batch** before batch-specific actions; its copied image and recipe remain readable if the original folder is unavailable. Unfavoriting moves the copy into `_favorites/.removed/`; the batch original is preserved. The output root selects the Favorites library; an open batch can have a different physical parent.
+
+## Images, adapters and Swift import
+
+**Image-to-image & LoRAs** contains render tools for future jobs. **Choose canvas…** opens a local image; **Use as canvas** in the viewer uses an existing image/Favorite and its resolved source prompt. No model or adapter is downloaded by the app.
+
+- **Append** resolves the editor's change text/fragments/fields, then appends it to the literal source prompt. **Replace** uses only the resolved editor text. Empty change text is allowed when appending a nonempty source prompt. Both modes create new output images; neither replaces original artwork.
+- Image strength is a separate native 0–1 control. **Match** requires the same aspect ratio; **Center-crop** explicitly crops to the output aspect. Both resize using recorded bilinear interpolation with alpha composited on white before either backend sees the canvas. The copied original, processed PNG hashes/dimensions, crop, strength, source and final prompt are recorded. Canvases are content-addressed under `.inputs/` and archived in the batch's `inputs/`; retries retain the same bytes/settings. Open batch restores the last editor request's canvas, falling back to archived copies. New jobs use the current renderer/LoRA setup; frozen historical jobs remain unchanged.
+- LoRA lines are `filename | weight | optional Draw Things version`. **Apply LoRAs** freezes the list for subsequent requests; edits do not alter queued images. Draw Things requires a converted local `.ckpt` tensor store and either catalog registration or an explicit native version. Raw SafeTensors are rejected before rendering. ComfyUI uses already-installed model-only SafeTensors adapters without Draw Things version labels. Triggers belong in the prompt and are not inserted by Story Batch. Empty the list and apply to turn adapters off.
+- **Text render · current setup** in the viewer explicitly creates a new text-to-image job with that image's resolved prompt, seed, steps, shift and dimensions, using the current model/LoRAs. It ignores the selected canvas. Ordinary step/shift variants keep their source's complete native recipe and canvas instead.
+- **Import Swift…** selects one legacy batch and displays its recorded old folder → selected folder mapping for confirmation. Optional selections JSON and Favorites directory are copied too. Imported outputs, raw report/configuration/input records and historical Draw Things recipes are retained; source files stay untouched. Old waiting work is canceled, never resumed. Missing/unsupported data is reported. Historical images require an explicit current-setup render or Use as canvas; their numeric native settings are not silently reassigned to ComfyUI. Other-batch Favorites keep usable historical metadata without inventing source mappings.
+
+The [Phase 5 guide/evidence](../app/docs/typescript-phase-5.md) describes format/compatibility limits and native verification. Asset file existence and successful loading do not establish that every third-party adapter is compatible with a model.
 
 ## Local data
 
@@ -56,7 +68,7 @@ The same adapters are available without the desktop UI:
 npm run render -- --config renderer.local.json --source smoke.local.txt --output Batches
 ```
 
-Config-relative executable/model directory paths stay local. Optional complete native `recipe` settings override the named backend preset. Draw Things sampler 17/Scale Alike are native identifiers; ComfyUI records its own workflow/sampler/scheduler. Unsupported nodes/assets/options fail visibly. LoRAs and image-to-image have separate later gates.
+Config-relative executable/model directory paths stay local. Optional complete native `recipe` settings override the named backend preset. Draw Things sampler 17/Scale Alike are native identifiers; ComfyUI records its own workflow/sampler/scheduler. Unsupported nodes/assets/options fail visibly. Compatible LoRAs are supported; ComfyUI requests with adapters use the explicit tools/v2 workflow. Image-to-image is configured in the desktop canvas panel.
 
 ```sh
 npm test
@@ -64,7 +76,7 @@ npm run host:probe
 npm run package
 ```
 
-Tests use temporary synthetic files and fake process/HTTP/WebSocket backends. The hidden desktop probe covers editing/undo, preview, frozen batches, continuation, variants, viewer navigation/sort identity, queue editing, Stop After, collections, external Favorites, search highlights, and durable draft/page restore without resuming work. It does not require a model. CI configures Windows/macOS runs; recorded evidence distinguishes configured checks from executed checks.
+Tests use temporary synthetic files and fake process/HTTP/WebSocket backends. The hidden desktop probe covers editing/undo, preview, frozen batches, continuation, native-setup copies, image-to-image append/replace/frozen options, legacy inspection, variants, viewer navigation/sort identity, queue editing, Stop After, collections, external Favorites, search highlights, and durable draft/page restore without resuming work. It does not require a model. CI configures Windows/macOS runs; recorded evidence distinguishes configured checks from executed checks.
 
 Packaging creates an unpacked native application under ignored `artifacts/` using compiled source, a minimal manifest, runtime libraries and Electron. Prompts, fields, local config, outputs, models and test fixtures are excluded. Build on the destination OS/architecture. Electron distribution procurement can be needed during packaging; ordinary application launch cannot download it. Signing/installers are release work.
 
@@ -76,6 +88,6 @@ Packaging creates an unpacked native application under ignored `artifacts/` usin
 
 Expressions are parsed with 38-significant-digit decimal arithmetic, never evaluated as code. Plain shift literals retain supplied precision; precision extremes/repeating division can differ from Foundation Decimal. Request/source limits are 100,000 images/2 MB; integers must fit JS safe integers. Fragment/field/output/expression bounds remain 256 depth / 64 chain / 1 MB expansion / 4096 characters and 64 depth. Native output decoding additionally caps at 64 megapixels and validates complete PNG data, dimensions and CRC.
 
-The new report format supports multiple runs/OS/framework contexts in a batch. It is not a Swift import converter. Rendering stays sequential, offline after procurement, and explicit about unsupported capabilities. Synthetic tests do not pass native quality/performance gates.
+The new report format supports multiple runs/OS/framework contexts in a batch. Swift import preserves old native settings as historical records; new backend requests are explicit. Rendering stays sequential, offline after procurement, and explicit about unsupported capabilities. Synthetic tests do not pass native quality/performance gates.
 
 See the [migration plan](../app/docs/typescript-migration-plan.md), [host decision](../app/docs/typescript-host-decision.md), [Phase 2 native evidence](../app/docs/typescript-phase-2.md) and [Phase 3 evidence](../app/docs/typescript-phase-3.md). This repository intentionally has no project license; third-party libraries retain their own licenses.

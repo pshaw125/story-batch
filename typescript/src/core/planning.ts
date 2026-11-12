@@ -8,7 +8,14 @@ export interface RunContext {
   rendererOs?: { name: string; version: string; arch: string };
   hardware: string; driver: string; computeRuntime: string; applicationVersion: string;
 }
+export interface CanvasAsset {path:string;hash:string;width:number;height:number}
+export interface CanvasSource {originalPath:string;prompt:string;jobId?:string;backend?:string}
+export interface CanvasSelection {asset:CanvasAsset;source:CanvasSource;strength:number;policy:'match'|'center-crop';mode:'append'|'replace'}
+export interface ImageInput {asset:CanvasAsset;original:CanvasAsset;source:CanvasSource;strength:number;preprocessing:{method:'bilinear-rgba-white-v1';policy:'match'|'center-crop';crop:{x:number;y:number;width:number;height:number}};prompt:{mode:'append'|'replace';instructions:string}}
 export interface ImageJob {
+  input?:ImageInput;
+  legacy?:{kind:'swift';originalNumber:number;originalFilename:string;recipeSource:string;record:unknown};
+  derivation?:{kind:'native-text-copy';sourceJobId:string;sourceBackend:string};
   schemaVersion: 1; id: string; batchId: string; runId: string; number: number;
   title: string; source: string; notes: string; prompt: string; sharedFields: Readonly<Record<string, string>>;
   seed: number; shift: string; steps: number; width: number; height: number;

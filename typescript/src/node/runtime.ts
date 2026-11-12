@@ -4,7 +4,7 @@ import { NativeRecipe, drawThingsPreset, validateRecipe } from '../core/recipes'
 import { Renderer } from '../core/renderer';
 import { RunContext } from '../core/planning';
 import { runContext } from './environment';
-import { comfyPreset } from './comfy-workflow';
+import { comfyPreset,withComfyTools } from './comfy-workflow';
 import { ComfyAdapter } from './renderers/comfyui';
 import { DrawThingsAdapter } from './renderers/draw-things';
 import { SyntheticRenderer } from './synthetic-renderer';
@@ -18,8 +18,8 @@ export async function configuredRuntime(file:string,workRoot:string):Promise<Run
   const adapter=config.backend==='draw-things'?new DrawThingsAdapter({executablePath:resolve(dirname(file),config.executablePath),modelsDirectory:config.modelsDirectory?resolve(dirname(file),config.modelsDirectory):undefined,workRoot})
     :config.backend==='comfyui'?new ComfyAdapter({baseUrl:config.baseUrl,dedicated:config.dedicated,workRoot}):null;
   if(!adapter)throw new Error('Choose draw-things or comfyui in renderer configuration.');
-  const recipe:NativeRecipe=config.recipe??(config.backend==='draw-things'?drawThingsPreset():comfyPreset());validateRecipe(recipe);
-  if(recipe.backend!==config.backend)throw new Error('Recipe backend differs from renderer configuration.');
+  let recipe:NativeRecipe=config.recipe??(config.backend==='draw-things'?drawThingsPreset():comfyPreset());validateRecipe(recipe);
+  if(recipe.backend!==config.backend)throw new Error('Recipe backend differs from renderer configuration.');if(recipe.backend==='comfyui'&&recipe.loras.length)recipe=withComfyTools(recipe);
   let template:RunContext|null=null;
   return {renderer:adapter,recipe,label:config.backend==='draw-things'?'Draw Things CLI':'ComfyUI',context:async()=>{
     template??=await adapter.context();return structuredClone(template);

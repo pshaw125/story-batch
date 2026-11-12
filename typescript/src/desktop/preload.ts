@@ -1,6 +1,7 @@
 import {contextBridge,ipcRenderer} from 'electron';
 import type {DesktopBridge} from './bridge';
 const bridge:DesktopBridge={
+  chooseCanvas:()=>ipcRenderer.invoke('choose-canvas'),useCanvas:id=>ipcRenderer.invoke('use-canvas',id),clearCanvas:()=>ipcRenderer.invoke('clear-canvas'),canvasOptions:options=>ipcRenderer.invoke('canvas-options',options),setLoras:loras=>ipcRenderer.invoke('set-loras',loras),nativeTextCopy:id=>ipcRenderer.invoke('native-text-copy',id),inspectImport:()=>ipcRenderer.invoke('inspect-import'),chooseImportPart:kind=>ipcRenderer.invoke('choose-import-part',kind),importSwift:mapping=>ipcRenderer.invoke('import-swift',mapping),
   state:()=>ipcRenderer.invoke('state'),
   preview:source=>ipcRenderer.invoke('preview',source),
   queue:(source,newBatch)=>ipcRenderer.invoke('queue',source,newBatch),

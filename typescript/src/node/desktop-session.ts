@@ -1,20 +1,26 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir,readFile,readdir,realpath,rename,rmdir } from 'node:fs/promises';
-import { join, relative, isAbsolute, sep } from 'node:path';
+import { mkdir,readFile,readdir,realpath,rename } from 'node:fs/promises';
+import { dirname, join, relative, isAbsolute, sep } from 'node:path';
 import { compile } from '../core/prompt';
 import { shifts } from '../core/arithmetic';
 import { deepFreeze } from '../core/errors';
-import { FrozenBatch, filename, freezeBatch, variant } from '../core/planning';
-import { BatchReport,ImageRecord } from '../core/reports';
+import { FrozenBatch, ImageJob, filename, freezeBatch, variant } from '../core/planning';
+import { BatchReport,ImageRecord,validateCanvasSelection } from '../core/reports';
 import { DesktopState, PreviewResult, RecipeSnapshot, VariantChange } from '../core/desktop';
 import { BatchExecutor } from './executor';
 import { ReportStore } from './storage';
 import {Favorites,FavoriteFile,imageMime} from './favorites';
 import {replaceParameter} from '../core/editor-values';
 import type {ImageSummary} from '../core/desktop';
+import {CanvasSelection,CanvasSource} from '../core/planning';
+import {LoRA,NativeRecipe,validateRecipe} from '../core/recipes';
+import {CanvasStore,readCanvas,recoverCanvas} from './canvas';
+import {withComfyTools} from './comfy-workflow';
+import {importSwiftBatch,SwiftImportOptions} from './legacy-import';
 import { Runtime } from './runtime';
 export class DesktopSession {
   private favorites:Favorites;private favoriteFiles:FavoriteFile[]=[];private createdHere=new Set<string>();
+  private canvas:CanvasSelection|null=null;private loraOverride:LoRA[]|null=null;
   private report:BatchReport|null=null;
   private store:ReportStore|null=null;
   private runtime:Runtime|null=null;
@@ -54,14 +60,14 @@ export class DesktopSession {
       return {id:job.id,number:job.number,filename:job.filename,seed:job.seed,shift:job.shift,steps:job.steps,width:job.width,height:job.height,
         status:!owned.has(job.id)&&record.status==='unknown'?'unresolved':!owned.has(job.id)&&['running','queued'].includes(record.status)?'interrupted':record.status,
         elapsedMs:record.elapsedMs,error:record.error,cached:record.cached,recency:Date.parse(record.finishedAt??record.startedAt??this.report!.runs.find(r=>r.id===job.runId)!.createdAt),
-        ...flags,favorite:this.favoriteFiles.some(f=>f.snapshot?.job.id===job.id&&f.sourceFolder===this.store?.folder),hasRecipe:true,inBatch:true,hasSource:false};
+        ...flags,favorite:this.favoriteFiles.some(f=>f.snapshot?.job.id===job.id&&f.sourceFolder===this.store?.folder),hasRecipe:true,inBatch:true,hasSource:false,historical:!!job.legacy};
     });
     const favorites:ImageSummary[]=this.favoriteFiles.map(file=>{
       const job=file.snapshot?.job;const original=file.sourceFolder===this.store?.folder?images.find(i=>i.id===job?.id):undefined;
       return {id:file.id,number:job?.number??0,filename:file.filename,seed:job?.seed??null,shift:job?.shift??null,steps:job?.steps??null,width:job?.width??null,height:job?.height??null,
-        status:'completed',elapsedMs:null,error:null,recency:file.recency,shortlisted:original?.shortlisted??false,rejected:original?.rejected??false,favorite:true,hasRecipe:!!file.snapshot,inBatch:!!original,hasSource:!!file.sourceFolder};
+        status:'completed',elapsedMs:null,error:null,recency:file.recency,shortlisted:original?.shortlisted??false,rejected:original?.rejected??false,favorite:true,hasRecipe:!!file.snapshot,inBatch:!!original,hasSource:!!file.sourceFolder,historical:!!job?.legacy};
     });
-    return structuredClone({renderer:this.runtime?.label??'No renderer selected',configured:!!this.runtime,busy:this.preparing||!!this.execution||this.pending.length>0,stopping:this.stopping,uncertain:this.uncertain,
+    return structuredClone({tools:this.runtime?{backend:this.runtime.recipe.backend,loras:this.loraOverride??this.runtime.recipe.loras,canvas:this.canvas}:undefined,renderer:this.runtime?.label??'No renderer selected',configured:!!this.runtime,busy:this.preparing||!!this.execution||this.pending.length>0,stopping:this.stopping,uncertain:this.uncertain,
       batchId:this.report?.batch.id??null,title:this.report?.batch.title??null,folder:this.store?.folder??null,outputRoot:this.outputRoot,images,favorites,favoriteFolder:this.favorites.folder,
       waiting:this.pending.flatMap(r=>r.jobs.map(j=>j.id)),lastRunCount:this.completedRun().length,activeId:this.activeId,progress:this.progress,activity:this.activity,error:this.error});
   }
@@ -69,14 +75,15 @@ export class DesktopSession {
   private note(message:string):void {this.activity.push(`${new Date().toLocaleTimeString()} · ${message}`);this.activity=this.activity.slice(-200);}
   private serial<T>(action:()=>Promise<T>):Promise<T>{const next=this.operations.then(action);this.operations=next.then(()=>{},()=>{});return next;}
   private lastNumber():number {return this.report?.batch.jobs.reduce((n,j)=>Math.max(n,j.number),0)??0;}
-  async setRuntime(runtime:Runtime):Promise<void>{await this.serial(async()=>{if(this.state().busy)throw new Error('Stop the batch before changing renderer.');this.runtime?.close();this.runtime=runtime;this.uncertain=false;this.previewCache=null;this.error=null;this.note(`Renderer: ${runtime.label}`);this.publish();});}
+  async setRuntime(runtime:Runtime):Promise<void>{await this.serial(async()=>{if(this.state().busy)throw new Error('Stop the batch before changing renderer.');this.runtime?.close();this.runtime=runtime;this.loraOverride=null;this.uncertain=false;this.previewCache=null;this.error=null;this.note(`Renderer: ${runtime.label}`);this.publish();});}
   async setOutputRoot(folder:string):Promise<void>{await this.serial(async()=>{if(this.state().busy)throw new Error('Stop the batch before changing output folder.');this.outputRoot=folder;this.favorites=new Favorites(folder);this.favoriteFiles=await this.favorites.list();this.publish();});}
   private async prepare(source:string):Promise<FrozenBatch>{
     if(!this.runtime)throw new Error('Choose a local renderer configuration first.');
     const compiled=compile(source,{defaultTitle:this.report?.batch.title});
     const same=this.report?.batch.title===compiled.parameters.title;
     const context=await this.runtime.context();context.id=randomUUID();context.createdAt=new Date().toISOString();
-    const round=freezeBatch(source,this.runtime.recipe,context,{random:Math.random,id:randomUUID,continuing:same?{id:this.report!.batch.id,title:this.report!.batch.title,lastNumber:this.lastNumber()}:undefined});
+    let round=freezeBatch(source,this.currentRecipe(),context,{random:Math.random,id:randomUUID,continuing:same?{id:this.report!.batch.id,title:this.report!.batch.title,lastNumber:this.lastNumber()}:undefined});
+    if(this.canvas){const input=await new CanvasStore(this.outputRoot).prepare(this.canvas,round.jobs[0].width,round.jobs[0].height,round.jobs[0].prompt);round=deepFreeze({...structuredClone(round),jobs:round.jobs.map(job=>({...structuredClone(job),input:{...structuredClone(input),prompt:{mode:this.canvas!.mode,instructions:job.prompt}},prompt:this.canvas!.mode==='append'?[this.canvas!.source.prompt,job.prompt.trim()].filter(Boolean).join('\n'):job.prompt}))});}
     for(const job of round.jobs)if(!job.prompt.trim())throw new Error(`Resolved prompt for image ${job.number} is empty.`);
     return round;
   }
@@ -122,6 +129,7 @@ export class DesktopSession {
   private async pump():Promise<void>{
     while(this.pending.length&&!this.stopping){
       const round=this.pending.shift()!;this.active=round;const store=this.store!,runtime=this.runtime!;await store.queueOrder(this.pending.flatMap(r=>r.jobs.map(j=>j.id)));
+      if(this.stopping){const saved=await store.load();await store.updateRecords(saved.records.filter(r=>round.jobs.some(j=>j.id===r.jobId)&&r.status==='queued').map(r=>({...r,status:'cancelled' as const})));this.report=structuredClone(await store.load());this.active=null;break;}
       const result=await this.executor.execute(round,runtime.renderer,store,{onEvent:event=>{
         this.activeId=event.jobId;
         if(event.type==='progress')this.progress={completed:event.completed,total:event.total};
@@ -148,9 +156,11 @@ export class DesktopSession {
   }
   async load(folder:string):Promise<{source:string;state:DesktopState}>{return this.serial(async()=>{
     if(this.state().busy)throw new Error('Stop the active batch before opening another.');
-    const store=ReportStore.open(folder),report=structuredClone(await store.load());this.store=store;this.report=report;this.previewCache=null;
+    const store=ReportStore.open(folder),report=structuredClone(await store.load());this.store=store;this.report=report;this.previewCache=null;this.canvas=null;
+    const input=[...report.batch.jobs].reverse().find(j=>j.source===(report.editorSource??report.batch.jobs.at(-1)?.source)&&!j.derivation)?.input;
+    let canvasError:string|null=null;if(input){let asset=input.original;try{asset=await recoverCanvas(asset,folder);}catch(error){canvasError='Saved canvas unavailable; choose a replacement or clear image-to-image: '+String(error);}this.canvas={asset,source:structuredClone(input.source),strength:input.strength,mode:input.prompt.mode,policy:input.preprocessing.policy};this.note('Restored saved canvas; new requests use the current renderer and LoRA setup.');}
     this.uncertain=this.uncertain||report.records.some(r=>r.status==='unknown');
-    this.error=this.uncertain?'Saved renderer work is unresolved. Check the dedicated renderer, then reselect its configuration before queueing new images.':null;
+    this.error=this.uncertain?'Saved renderer work is unresolved. Check the dedicated renderer, then reselect its configuration before queueing new images.':canvasError;
     this.note('Opened saved batch. Saved waiting work is not resumed.');this.publish();
     return {source:report.editorSource??report.batch.jobs.at(-1)?.source??'\n',state:this.state()};
   });}
@@ -171,6 +181,7 @@ export class DesktopSession {
     this.preparing=true;this.publish();
     try {
     const sourceId=this.batchSource(id);const {job:source}=this.recipe(sourceId);
+    if(source.legacy)throw new Error('Historical import: use Text render with current renderer or Use as canvas explicitly.');
     if(this.report?.records.find(r=>r.jobId===sourceId)?.status!=='completed')throw new Error('Choose a completed source image.');
     if(!this.runtime||source.recipe.backend!==this.runtime.recipe.backend)throw new Error('Select the source image’s renderer backend before queueing a variant.');
     const context=await this.runtime.context();context.id=randomUUID();context.createdAt=new Date().toISOString();
@@ -179,11 +190,27 @@ export class DesktopSession {
     if('steps'in change){if(![4,6,7,8].includes(change.steps)||change.steps<=source.steps)throw new Error('Choose an available higher step count.');steps=change.steps;}
     else if('delta'in change){if(!['-1','-0.25','-0.1','-0.05','+0.05','+0.1','+0.25','+1'].includes(change.delta))throw new Error('Invalid shift adjustment.');shift=shifts(`(${source.shift})+(${change.delta})`)[0];}
     else {if(!/^(?:\d+(?:\.\d{1,3})?|\.\d{1,3})$/.test(change.shift.trim()))throw new Error('Enter a positive shift with at most three decimal places.');shift=shifts(change.shift)[0];}
-    const job=variant(source,{steps,shift},this.lastNumber()+1,randomUUID(),context.id);
+    let job=variant(source,{steps,shift},this.lastNumber()+1,randomUUID(),context.id);if(job.input)job=deepFreeze({...structuredClone(job),input:{...structuredClone(job.input),asset:await recoverCanvas(job.input.asset,this.store!.folder),original:await recoverCanvas(job.input.original,this.store!.folder)}});
     const round:FrozenBatch=deepFreeze({schemaVersion:1,id:this.report!.batch.id,title:this.report!.batch.title,createdAt:context.createdAt,run:context,jobs:[job]});
     this.error=null;await this.persistRound(round,false);if(fromShortlist&&this.flags(sourceId).shortlisted){await this.store!.selection(job.id,'shortlisted',true);this.report=structuredClone(await this.store!.load());}this.pending.push(...round.jobs.map(job=>deepFreeze({...round,jobs:[job]})));this.note(`Queued variant: ${job.filename}`);if(!this.stopping)this.start();this.publish();return this.state();
     } finally {this.preparing=false;this.publish();}
   }).then(()=>this.state());}
+  private currentRecipe():NativeRecipe {if(!this.runtime)throw new Error('Choose a renderer first.');let recipe=structuredClone(this.runtime.recipe);recipe.loras=structuredClone(this.loraOverride??recipe.loras);if(recipe.backend==='comfyui'&&(this.canvas||recipe.loras.length))recipe=withComfyTools(recipe);validateRecipe(recipe);return recipe;}
+  async setLoras(loras:LoRA[]):Promise<DesktopState>{return this.serial(async()=>{if(!this.runtime)throw new Error('Choose a renderer first.');const recipe={...this.currentRecipe(),loras:structuredClone(loras)};validateRecipe(recipe);if(recipe.backend==='draw-things'&&loras.some(l=>l.encoderWeight!==null))throw new Error('Draw Things uses a single LoRA weight; encoderWeight must be null.');if(recipe.backend==='comfyui'){withComfyTools(recipe);if(loras.some(l=>l.encoderWeight!==null&&l.encoderWeight!==0||l.nativeVersion!==undefined))throw new Error('ComfyUI Z-Image uses model-only LoRAs without Draw Things version labels.');}this.loraOverride=structuredClone(loras);this.previewCache=null;this.publish();return this.state();});}
+  async selectCanvas(bytes:Uint8Array,source:CanvasSource):Promise<DesktopState>{return this.serial(async()=>{const asset=await new CanvasStore(this.outputRoot).capture(bytes),selection:CanvasSelection={asset,source:structuredClone(source),strength:.35,policy:'match',mode:source.prompt?'append':'replace'};validateCanvasSelection(selection);this.canvas=selection;this.previewCache=null;this.publish();return this.state();});}
+  async useCanvas(id:string,normalize:(bytes:Uint8Array)=>Uint8Array=bytes=>bytes):Promise<DesktopState>{const favorite=this.favoriteFor(id),snapshot=favorite?.snapshot??(this.report?.batch.jobs.some(j=>j.id===id)?this.recipe(id):null);const originalPath=favorite?join(this.favorites.folder,favorite.filename):join(this.store!.folder,snapshot!.job.filename);const bytes=normalize(await this.image(id));return this.selectCanvas(bytes,{originalPath,prompt:snapshot?.job.prompt??'',...(snapshot?{jobId:snapshot.job.id,backend:snapshot.job.recipe.backend}:{})});}
+  async canvasOptions(options:{strength:number;policy:'match'|'center-crop';mode:'append'|'replace'}):Promise<DesktopState>{return this.serial(async()=>{if(!this.canvas)throw new Error('Choose a canvas first.');if(!options||!Number.isFinite(options.strength)||options.strength<0||options.strength>1||!['match','center-crop'].includes(options.policy)||!['append','replace'].includes(options.mode))throw new Error('Choose image strength 0..1, append/replace, and match/center-crop.');this.canvas={...this.canvas,strength:options.strength,policy:options.policy,mode:options.mode};this.previewCache=null;this.publish();return this.state();});}
+  async clearCanvas():Promise<DesktopState>{return this.serial(async()=>{this.canvas=null;this.previewCache=null;this.publish();return this.state();});}
+  async restoreTools(tools:NonNullable<DesktopState['tools']>):Promise<void>{if(!this.runtime||tools.backend!==this.runtime.recipe.backend)throw new Error('Saved render tools use a different backend; select compatible assets before restoring them.');if(tools.canvas){validateCanvasSelection(tools.canvas);await readCanvas(tools.canvas.asset);}await this.setLoras(tools.loras);if(tools.canvas){await this.serial(async()=>{this.canvas=structuredClone(tools.canvas);});await this.canvasOptions(tools.canvas);}}
+  async importSwift(options:Omit<SwiftImportOptions,'outputRoot'>):Promise<{source:string;state:DesktopState;warnings:string[]}>{
+    const result=await this.serial(async()=>{if(this.state().busy)throw new Error('Stop the active batch before importing.');const imported=await importSwiftBatch({...options,outputRoot:this.outputRoot});this.favoriteFiles=await this.favorites.list();return imported;});const loaded=await this.load(result.folder);return {...loaded,warnings:result.warnings};
+  }
+  async nativeTextCopy(id:string):Promise<DesktopState>{return this.serial(async()=>{
+    if(this.stopping||this.uncertain||!this.runtime)throw new Error('Choose/reconcile a renderer first.');const sourceId=this.batchSource(id),{job:source}=this.recipe(sourceId);if(this.report?.records.find(r=>r.jobId===sourceId)?.status!=='completed')throw new Error('Choose a completed source.');
+    this.preparing=true;this.publish();try{const context=await this.runtime.context();context.id=randomUUID();context.createdAt=new Date().toISOString();if(this.stopping)return this.state();const number=this.lastNumber()+1;
+    const job:ImageJob={...structuredClone(source),id:randomUUID(),runId:context.id,number,filename:filename(source.title,source.seed,source.steps,source.shift,number),recipe:this.currentRecipe(),derivation:{kind:'native-text-copy',sourceJobId:source.id,sourceBackend:source.recipe.backend}};delete job.legacy;delete job.input;
+    const round:FrozenBatch=deepFreeze({schemaVersion:1,id:this.report!.batch.id,title:this.report!.batch.title,createdAt:context.createdAt,run:context,jobs:[job]});await this.persistRound(round,false);this.pending.push(round);this.previewCache=null;this.start();this.publish();return this.state();}finally{this.preparing=false;this.publish();}
+  });}
   async refreshFavorites():Promise<DesktopState>{return this.serial(async()=>{this.favoriteFiles=await this.favorites.list();this.publish();return this.state();});}
   mime(id:string):string{return this.favoriteFor(id)?imageMime(this.favoriteFor(id)!.filename):'image/png';}
   async toggleSelection(id:string,kind:'shortlisted'|'rejected'):Promise<DesktopState>{return this.serial(async()=>{
@@ -224,9 +251,11 @@ export class DesktopSession {
   async stopAfter():Promise<DesktopState>{return this.serial(async()=>{await this.clearPending();this.note('Waiting queue cleared; current image will finish.');this.publish();return this.state();});}
   private async cleanupEmpty():Promise<void>{
     if(!this.report||!this.store||!this.createdHere.has(this.report.batch.id)||!this.report.records.length||!this.report.records.every(r=>r.status==='cancelled'))return;
-    if((await readdir(this.store.folder)).some(name=>name!=='report.json'))return;
-    const archive=join(this.outputRoot,'.attempts','cancelled-batches',this.report.batch.id);await mkdir(archive,{recursive:true});
-    await rename(join(this.store.folder,'report.json'),join(archive,'report.json'));await rmdir(this.store.folder);
+    if((await readdir(this.store.folder)).some(name=>!['report.json','inputs'].includes(name)))return;
+    const expected=new Set(this.report.batch.jobs.flatMap(j=>j.input?[j.input.asset.hash+'.png',j.input.original.hash+'.png']:[]));
+    try{if((await readdir(join(this.store.folder,'inputs'),{withFileTypes:true})).some(file=>!file.isFile()||!expected.has(file.name)))return;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    const archive=join(this.outputRoot,'.attempts','cancelled-batches',this.report.batch.id);await mkdir(dirname(archive),{recursive:true});
+    await rename(this.store.folder,archive);
     this.note('Removed empty canceled batch; diagnostics retained.');this.createdHere.delete(this.report.batch.id);this.report=null;this.store=null;this.previewCache=null;
   }
   async idle():Promise<void>{await this.operations;while(this.execution)await this.execution;}

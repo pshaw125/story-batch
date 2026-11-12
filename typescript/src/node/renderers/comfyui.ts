@@ -7,12 +7,13 @@ import { Capabilities, RenderError } from '../../core/renderer';
 import { runContext } from '../environment';
 import { validatePNG, validateOutputSize } from '../png';
 import { comfyWorkflow, Workflow, workflowNodes } from '../comfy-workflow';
+import {validateInput,readCanvas} from '../canvas';
 import { Adapter, Entry } from './base';
 export interface ComfyConfig { baseUrl:string; workRoot:string; dedicated:true; timeoutMs?:number }
 type Json=Record<string,any>; // Native API payloads are validated at each boundary; no application code consumes them directly.
 interface Remote { promptId:string; token:string; graph:Workflow; socket:WebSocket|null; cancelled:boolean; outputLoaded:boolean }
 export class ComfyAdapter extends Adapter {
-  readonly capabilities:Capabilities={backend:'comfyui',textToImage:true,imageToImage:false,loras:false,cancellation:true,progress:true,nativeControls:['seed','shift','steps','dimensions','guidance','sampler','scheduler']};
+  readonly capabilities:Capabilities={backend:'comfyui',textToImage:true,imageToImage:true,loras:true,cancellation:true,progress:true,nativeControls:['seed','shift','steps','dimensions','guidance','sampler','scheduler']};
   private base:URL;
   private remotes=new Map<string,Remote>();
   constructor(readonly config:ComfyConfig){
@@ -43,12 +44,13 @@ export class ComfyAdapter extends Adapter {
         for(const [key,value] of Object.entries(node.inputs)){
           const spec=types[key];if(!spec)throw new Error(`Unsupported node input ${node.class_type}.${key}.`);
           if(Array.isArray(value))continue; // Graph links, not user choices.
-          if(Array.isArray(spec[0])&&!spec[0].includes(value))throw new Error(`Unsupported ${node.class_type}.${key}: ${value}`);
+          if(!(node.class_type==='LoadImage'&&key==='image')&&Array.isArray(spec[0])&&!spec[0].includes(value))throw new Error(`Unsupported ${node.class_type}.${key}: ${value}`);
           if(typeof value==='number'&&(!Number.isFinite(value)||spec[1]?.min!==undefined&&value<spec[1].min||spec[1]?.max!==undefined&&value>spec[1].max))throw new Error(`Out-of-range ${node.class_type}.${key}: ${value}`);
         }
       }
       if(job.recipe.backend!=='comfyui')throw new Error('ComfyUI recipe required.');
-      for(const [folder,asset] of [['diffusion_models',job.recipe.model],['text_encoders',job.recipe.textEncoder],['vae',job.recipe.vae]] as const){
+      await validateInput(job);
+      for(const [folder,asset] of [['diffusion_models',job.recipe.model],['text_encoders',job.recipe.textEncoder],['vae',job.recipe.vae],...job.recipe.loras.map(l=>['loras',l.asset] as const)] as const){
         const response=await this.request(`/models/${folder}`);if(!response.ok)throw new Error(`Cannot inspect local ${folder}.`);
         const names:unknown=await response.json();if(!Array.isArray(names)||!names.includes(asset.id))throw new Error(`Missing local ${folder}: ${asset.id}. No download will be attempted.`);
       }
@@ -58,7 +60,15 @@ export class ComfyAdapter extends Adapter {
     let queue:Json;
     try{queue=await this.json('/queue');}catch(error){throw new RenderError(`Cannot validate dedicated instance: ${String(error)}`,'validation');}
     if(!Array.isArray(queue.queue_running)||!Array.isArray(queue.queue_pending)||queue.queue_running.length||queue.queue_pending.length)throw new RenderError('Dedicated ComfyUI instance must be idle before submission.','validation');
-    const token=randomUUID(), graph=comfyWorkflow(e.job,`story-batch/${token}`), remote:Remote={promptId:token,token,graph,socket:null,cancelled:false,outputLoaded:false};
+    const token=randomUUID();let uploaded:string|undefined;
+    if(e.job.input){
+      try{const bytes=await readCanvas(e.job.input.asset),form=new FormData();form.append('image',new Blob([new Uint8Array(bytes)],{type:'image/png'}),token+'.png');form.append('type','input');form.append('subfolder','story-batch');form.append('overwrite','false');
+      const response=await fetch(new URL('/upload/image',this.base),{method:'POST',body:form,redirect:'error',signal:AbortSignal.timeout(this.config.timeoutMs??10000)});if(!response.ok)throw new Error('Image upload HTTP '+response.status);const value=await response.json() as Json;
+      if(value.type!=='input'||typeof value.name!=='string'||!value.name.endsWith('.png')||/[\\/]/.test(value.name)||typeof value.subfolder!=='string'||value.subfolder.split(/[\\/]/).some((s:string)=>s==='..'||s==='.')||value.subfolder.startsWith('/'))throw new Error('Invalid uploaded canvas identity.');uploaded=(value.subfolder?value.subfolder+'/':'')+value.name;
+      const verify=await this.request('/view?'+new URLSearchParams({filename:value.name,subfolder:value.subfolder,type:'input'}));if(!verify.ok)throw new Error('Cannot verify uploaded canvas.');const remoteBytes=new Uint8Array(await verify.arrayBuffer());if(createHash('sha256').update(remoteBytes).digest('hex')!==e.job.input.asset.hash)throw new Error('Uploaded canvas bytes differ.');
+      }catch(error){throw new RenderError('Canvas upload failed before render submission: '+String(error),'validation');}
+    }
+    const graph=comfyWorkflow(e.job,`story-batch/${token}`,uploaded), remote:Remote={promptId:token,token,graph,socket:null,cancelled:false,outputLoaded:false};
     this.remotes.set(e.handle,remote);
     const folder=join(this.config.workRoot,createHash('sha256').update(e.handle).digest('hex'));await mkdir(folder,{recursive:true});
     const body={prompt:graph,prompt_id:token,client_id:token,extra_data:{story_batch:{token,jobId:e.job.id,attempt:e.attempt}}};

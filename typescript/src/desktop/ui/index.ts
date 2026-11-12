@@ -3,6 +3,7 @@ import {compile} from '../../core/prompt';
 import {Editor} from './editor';
 import {Gallery} from './gallery';
 import {Viewer} from './viewer';
+import {RenderTools,importControls} from './render-tools';
 import {Find} from './find';
 import type {GalleryScope,ImageSort} from '../../core/gallery';
 import {params} from './gallery';
@@ -14,10 +15,11 @@ function clearError():void {feedback.hidden=true;feedback.textContent='';}
 let scope:GalleryScope='images',sort:ImageSort='seeded';
 const find=new Find(editor);
 function persist():void{if(state)void window.storyBatch.saveDraft(window.storyBatchDraft!()).catch(e=>showError(String(e)));}
-window.storyBatchDraft=()=>({source:editor.source(),lastBatch:state?.folder??null,scope,sort});
+window.storyBatchDraft=()=>({source:editor.source(),lastBatch:state?.folder??null,scope,sort,tools:state?.tools});
 function imageAction(id:string,kind:'shortlisted'|'favorite'|'rejected'):void{void action(async()=>update(await(kind==='favorite'?window.storyBatch.favorite(id):window.storyBatch.selection(id,kind))));}
 function setSort(value:ImageSort):void{sort=value;if(state)update(state);persist();}
-const viewer=new Viewer(showError,imageAction,setSort,id=>void action(async()=>{const result=await window.storyBatch.openFavoriteSource(id);editor.load(result.source);resetPreview();update(result.state);tab('images');viewer.open(result.imageId);}));
+const tools=new RenderTools(update,showError,()=>{if(state?.tools?.canvas?.mode==='append'){editor.replacePrompt('');}document.querySelector<HTMLDetailsElement>('#render-tools')!.open=true;validate();persist();});
+const viewer=new Viewer(showError,imageAction,setSort,id=>void action(async()=>{const result=await window.storyBatch.openFavoriteSource(id);editor.load(result.source);resetPreview();update(result.state);tab('images');viewer.open(result.imageId);}),id=>void action(async()=>{update(await window.storyBatch.useCanvas(id));if(state?.tools?.canvas?.mode==='append')editor.replacePrompt('');document.querySelector<HTMLDetailsElement>('#render-tools')!.open=true;validate();persist();}));
 const gallery=new Gallery(id=>viewer.open(id),showError,imageAction);
 function tab(name:string):void {
   const collection=['images','shortlist','favorites','rejected'].includes(name);
@@ -31,7 +33,7 @@ function tab(name:string):void {
 function validate():void {
   const text=document.querySelector<HTMLElement>('#validation')!;
   let valid=false,title:string|null=null;
-  try{const compiled=compile(editor.source(),{defaultTitle:state?.title??undefined});if(!editor.prompt.value.trim())throw new Error('Enter a prompt to generate images.');valid=true;title=compiled.parameters.title;text.textContent=`${compiled.parameters.count} image(s) · ${compiled.parameters.width}×${compiled.parameters.height} · ${compiled.parameters.steps} steps`;text.classList.remove('invalid');}
+  try{const compiled=compile(editor.source(),{defaultTitle:state?.title??undefined});if(!editor.prompt.value.trim()&&!(state?.tools?.canvas?.mode==='append'&&state.tools.canvas.source.prompt.trim()))throw new Error('Enter a prompt to generate images.');valid=true;title=compiled.parameters.title;text.textContent=`${compiled.parameters.count} image(s) · ${compiled.parameters.width}×${compiled.parameters.height} · ${compiled.parameters.steps} steps`;text.classList.remove('invalid');}
   catch(e){text.textContent=String(e);text.classList.add('invalid');}
   const startsNew=!!state?.batchId&&title!==state.title;
   (document.querySelector('#preview') as HTMLButtonElement).disabled=!valid||!state?.configured;
@@ -42,12 +44,12 @@ function validate():void {
   notice.textContent=previewSource!==editor.source()?'Draft changed. Resolve preview to inspect the new choices.':'This preview has been queued. Resolve again to inspect the next request.';
 }
 function update(value:DesktopState):void {
-  state=value;document.querySelector('#renderer-label')!.textContent=value.renderer+(value.renderer.startsWith('Synthetic')?' · color swatches, no inference':' · local / offline');
+  if(state&&JSON.stringify(state.tools)!==JSON.stringify(value.tools))resetPreview();state=value;document.querySelector('#renderer-label')!.textContent=value.renderer+(value.renderer.startsWith('Synthetic')?' · color swatches, no inference':' · local / offline');
   document.querySelector('#batch-title')!.textContent=value.title??'No batch open';const folder=document.querySelector<HTMLElement>('#batch-folder')!;folder.textContent=value.folder??value.outputRoot;folder.title=value.folder??value.outputRoot;
   document.querySelector('#image-count')!.textContent=value.images.filter(i=>i.status==='completed').length.toString();document.querySelector('#queue-count')!.textContent=value.images.filter(i=>['queued','running','unknown'].includes(i.status)).length.toString();
   (document.querySelector('#stop') as HTMLButtonElement).disabled=!value.busy||value.stopping;(document.querySelector('#stop') as HTMLButtonElement).textContent=value.stopping?'Stopping…':'Stop Batch';
-  for(const id of ['configure','synthetic','output-folder','open-batch'])(document.querySelector('#'+id) as HTMLButtonElement).disabled=value.busy;
-  gallery.update(value,scope,sort);viewer.update(value,scope,sort);
+  for(const id of ['configure','synthetic','output-folder','open-batch','import-batch'])(document.querySelector('#'+id) as HTMLButtonElement).disabled=value.busy;
+  tools.render(value);gallery.update(value,scope,sort);viewer.update(value,scope,sort);
   (document.querySelector('#gallery-sort') as HTMLSelectElement).value=sort;
   (document.querySelector('#stop-after') as HTMLButtonElement).disabled=!value.busy||value.stopping;
   for(const id of ['collect-seeds','collect-shifts'])(document.querySelector('#'+id) as HTMLButtonElement).disabled=value.busy||!value.lastRunCount;
@@ -94,3 +96,5 @@ document.querySelector('#stop-after')!.addEventListener('click',()=>void action(
 document.querySelector('#gallery-sort')!.addEventListener('change',e=>setSort((e.target as HTMLSelectElement).value as ImageSort));
 document.querySelector('#refresh-favorites')!.addEventListener('click',()=>void action(async()=>update(await window.storyBatch.refreshFavorites())));
 for(const [id,kind] of [['collect-seeds','seeds'],['collect-shifts','shift']] as const)document.querySelector('#'+id)!.addEventListener('click',()=>void action(async()=>{const before=editor.source(),result=await window.storyBatch.collect(before,kind);if(before!==editor.source())throw new Error('Draft changed during collection; collect again.');editor.replaceParameters(result);find.refresh();validate();persist();}));
+
+importControls((source,value)=>{editor.load(source);resetPreview();update(value);find.refresh();tab('images');},showError);

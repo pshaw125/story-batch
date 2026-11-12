@@ -1,10 +1,12 @@
-import { FrozenBatch, ImageJob, RunContext, validateContext } from './planning';
+import { CanvasAsset, CanvasSelection, FrozenBatch, ImageJob, RunContext, validateContext } from './planning';
 import { validateRecipe } from './recipes';
 import { shiftValue } from './arithmetic';
 import { requireThat } from './errors';
 import { JobStatus, NativeObservations } from './renderer';
 export interface ImageRecord { executionIndex?:number;startedAt?:string;finishedAt?:string; observations?: NativeObservations; cached?: boolean; rendererElapsedMs?: number; effectiveJob?: ImageJob; jobId: string; status: JobStatus; attempts: number; elapsedMs: number | null; output: string | null; error: string | null }
-export interface BatchReport { selections?:Record<string,{shortlisted:boolean;rejected:boolean}>;queueOrder?:string[]; editorSource?: string; schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
+export interface BatchReport { imported?:{kind:'swift';sourceFolder:string;reportFilename:string;reportHash:string;importedAt:string;mapping:{from:string;to:string};warnings:string[]}; selections?:Record<string,{shortlisted:boolean;rejected:boolean}>;queueOrder?:string[]; editorSource?: string; schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
+export function validateCanvasAsset(asset:CanvasAsset):void {requireThat(asset&&typeof asset.path==='string'&&!!asset.path.trim()&&/^[a-f0-9]{64}$/.test(asset.hash)&&[asset.width,asset.height].every(n=>Number.isSafeInteger(n)&&n>0)&&asset.width*asset.height<=64*1024*1024,'Invalid copied canvas asset.');}
+export function validateCanvasSelection(canvas:CanvasSelection):void {validateCanvasAsset(canvas?.asset);requireThat(canvas.source&&typeof canvas.source.originalPath==='string'&&typeof canvas.source.prompt==='string'&&['append','replace'].includes(canvas.mode)&&['match','center-crop'].includes(canvas.policy)&&Number.isFinite(canvas.strength)&&canvas.strength>=0&&canvas.strength<=1,'Invalid image-to-image selection.');}
 export function validateJob(job: ImageJob): void {
   requireThat(job?.schemaVersion === 1 && [job.id, job.batchId, job.runId, job.title, job.filename].every(v => typeof v === 'string' && v.trim()), 'Invalid image identity.');
   requireThat(typeof job.prompt === 'string' && typeof job.source === 'string' && typeof job.notes === 'string', 'Invalid prompt snapshot.');
@@ -13,11 +15,14 @@ export function validateJob(job: ImageJob): void {
   requireThat(Number.isSafeInteger(job.number) && job.number > 0 && Number.isSafeInteger(job.seed) && job.seed >= 0 && job.seed <= 2147483647,
     'Invalid image number or seed.');
   requireThat(Number.isSafeInteger(job.steps) && job.steps > 0 && [job.width, job.height].every(v => Number.isSafeInteger(v) && v > 0 && v % 64 === 0 && v <= 64 * 65535), 'Invalid image dimensions/steps.');
+  if(job.input){const input=job.input;validateCanvasAsset(input.asset);validateCanvasAsset(input.original);requireThat(input.asset.width===job.width&&input.asset.height===job.height,'Canvas dimensions differ from output.');requireThat(Number.isFinite(input.strength)&&input.strength>=0&&input.strength<=1,'Image strength must be from 0 to 1.');requireThat(input.preprocessing?.method==='bilinear-rgba-white-v1'&&['match','center-crop'].includes(input.preprocessing.policy),'Unsupported canvas preprocessing.');const crop=input.preprocessing.crop;requireThat(crop&&[crop.x,crop.y,crop.width,crop.height].every(Number.isFinite)&&crop.x>=0&&crop.y>=0&&crop.width>0&&crop.height>0&&crop.x+crop.width<=input.original.width+1e-6&&crop.y+crop.height<=input.original.height+1e-6,'Invalid canvas crop.');requireThat(['append','replace'].includes(input.prompt?.mode)&&typeof input.prompt.instructions==='string'&&typeof input.source?.prompt==='string'&&typeof input.source.originalPath==='string','Invalid image prompt provenance.');}
+  if(job.legacy)requireThat(job.legacy.kind==='swift'&&Number.isSafeInteger(job.legacy.originalNumber)&&typeof job.legacy.originalFilename==='string'&&typeof job.legacy.recipeSource==='string','Invalid legacy provenance.');
   shiftValue(job.shift); validateRecipe(job.recipe);
 }
 export function validateReport(value: BatchReport): void {
   requireThat(value?.schemaVersion === 1 && value.batch?.schemaVersion === 1, 'Unsupported report schema.');
   requireThat(value.editorSource===undefined||typeof value.editorSource==='string','Invalid editor source.');
+  if(value.imported!==undefined)requireThat(value.imported.kind==='swift'&&typeof value.imported.sourceFolder==='string'&&typeof value.imported.reportFilename==='string'&&/^[a-f0-9]{64}$/.test(value.imported.reportHash)&&Number.isFinite(Date.parse(value.imported.importedAt))&&typeof value.imported.mapping?.from==='string'&&typeof value.imported.mapping.to==='string'&&Array.isArray(value.imported.warnings)&&value.imported.warnings.every(s=>typeof s==='string'),'Invalid import provenance.');
   const b = value.batch;
   requireThat([b.id, b.title, b.createdAt].every(v => typeof v === 'string' && v.trim()) && !Number.isNaN(Date.parse(b.createdAt)), 'Invalid batch identity.');
   validateContext(b.run);
@@ -59,6 +64,7 @@ export function appendRound(report: BatchReport, round: FrozenBatch, updateEdito
   requireThat(round.jobs.every((j, i) => j.number === last + i + 1), 'Continuation numbering must follow existing jobs.');
   const result: BatchReport = {
     schemaVersion: 1,
+    imported:structuredClone(report.imported),
     selections:structuredClone(report.selections??{}),queueOrder:structuredClone(report.queueOrder??[]),
     editorSource: updateEditorSource ? round.jobs[0]?.source ?? report.editorSource : report.editorSource ?? report.batch.jobs.at(-1)?.source,
     batch: { ...structuredClone(report.batch), jobs: [...structuredClone(report.batch.jobs), ...structuredClone(round.jobs)] },

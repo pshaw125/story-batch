@@ -1,5 +1,14 @@
-import type { DesktopState, PreviewResult, RecipeSnapshot, VariantChange, DraftSnapshot } from '../core/desktop';
+import type { DesktopState, PreviewResult, RecipeSnapshot, VariantChange, DraftSnapshot, SwiftImportPreview } from '../core/desktop';
 export interface DesktopBridge {
+  chooseCanvas():Promise<DesktopState|null>;
+  useCanvas(id:string):Promise<DesktopState>;
+  clearCanvas():Promise<DesktopState>;
+  canvasOptions(options:{strength:number;policy:'match'|'center-crop';mode:'append'|'replace'}):Promise<DesktopState>;
+  setLoras(loras:import('../core/recipes').LoRA[]):Promise<DesktopState>;
+  nativeTextCopy(id:string):Promise<DesktopState>;
+  inspectImport():Promise<SwiftImportPreview|null>;
+  chooseImportPart(kind:'selections'|'favorites'):Promise<string|null>;
+  importSwift(mapping:{from:string;to:string}):Promise<{source:string;state:DesktopState;warnings:string[]}>;
   state():Promise<DesktopState>;
   preview(source:string):Promise<PreviewResult>;
   queue(source:string,newBatch:boolean):Promise<DesktopState>;

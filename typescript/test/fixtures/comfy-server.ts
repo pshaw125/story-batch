@@ -6,7 +6,7 @@ import { comfyPreset, comfyWorkflow } from '../../src/node/comfy-workflow';
 import { freezeBatch } from '../../src/core/planning';
 import { runContext } from '../../src/node/environment';
 export async function fakeComfy(mode='success') {
-  const posts:any[]=[];const history:Record<string,any>={};let running:any[]=[],pending:any[]=[];let interrupts=0;
+  const posts:any[]=[];const uploads:{name:string;bytes:Buffer}[]=[];const history:Record<string,any>={};let running:any[]=[],pending:any[]=[];let interrupts=0;
   const template=freezeBatch('count=1;resolution=64*64\nsynthetic',comfyPreset(),runContext('fake-comfy','1'),{random:()=>.5,id:randomUUID}).jobs[0];
   const info:Record<string,any>={};
   for(const node of Object.values(comfyWorkflow(template,'test'))){
@@ -18,6 +18,7 @@ export async function fakeComfy(mode='success') {
     }
     info[node.class_type]={input:{required}};
   }
+  info.LoadImage={input:{required:{image:[['existing.png']]}}};info.VAEEncode={input:{required:{pixels:['IMAGE'],vae:['VAE']}}};info.LoraLoaderModelOnly={input:{required:{model:['MODEL'],lora_name:[['synthetic-style.safetensors','first.safetensors','second.safetensors']],strength_model:['FLOAT',{min:-100,max:100}]}}};
   if(mode==='missing-node')delete info.ModelSamplingAuraFlow;
   const image=new PNG({width:mode==='wrong-size'?128:64,height:64});image.data.fill(160);
   const bytes=mode==='incomplete'?Buffer.from('invalid image'):PNG.sync.write(image);
@@ -25,8 +26,10 @@ export async function fakeComfy(mode='success') {
   const read=async(req:IncomingMessage)=>{let text='';for await(const b of req)text+=b;return JSON.parse(text);};
   const server=createServer((req,res)=>{void(async()=>{
     const url=new URL(req.url!,'http://127.0.0.1');
+    if(url.pathname==='/upload/image'){if(mode==='upload-failed')return json(res,{error:'synthetic upload failure'},400);const chunks=[];for await(const chunk of req)chunks.push(Buffer.from(chunk));const form=await new Request(url,{method:'POST',headers:{'content-type':req.headers['content-type']!},body:new Uint8Array(Buffer.concat(chunks))}).formData();const image=form.get('image') as File;uploads.push({name:image.name,bytes:Buffer.from(await image.arrayBuffer())});return json(res,{name:image.name,subfolder:'story-batch',type:'input'});}
+    if(url.pathname==='/view'&&url.searchParams.get('type')==='input'){res.writeHead(200,{'content-type':'image/png'});res.end(mode==='bad-upload'?bytes:uploads.find(u=>u.name===url.searchParams.get('filename'))?.bytes);return;}
     if(url.pathname==='/object_info')return json(res,info);
-    if(url.pathname.startsWith('/models/'))return json(res,mode==='missing-model'?[]:[comfyPreset().model.id,comfyPreset().textEncoder.id,comfyPreset().vae.id]);
+    if(url.pathname.startsWith('/models/'))return json(res,mode==='missing-model'||mode==='missing-lora'&&url.pathname==='/models/loras'?[]:['synthetic-style.safetensors','first.safetensors','second.safetensors',comfyPreset().model.id,comfyPreset().textEncoder.id,comfyPreset().vae.id]);
     if(url.pathname==='/system_stats')return json(res,{system:{comfyui_version:'synthetic-1',python_version:'test',pytorch_version:'test'},devices:[{name:'synthetic'}]});
     if(url.pathname==='/prompt'&&req.method==='POST'){
       const body=await read(req);posts.push(body);
@@ -57,5 +60,5 @@ export async function fakeComfy(mode='success') {
   const sockets=new WebSocketServer({server});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();if(!address||typeof address==='string')throw new Error('Missing fake port.');
-  return {url:`http://127.0.0.1:${address.port}`,posts,get interrupts(){return interrupts;},async close(){for(const c of sockets.clients)c.terminate();await new Promise<void>(resolve=>sockets.close(()=>resolve()));server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}};
+  return {url:`http://127.0.0.1:${address.port}`,posts,uploads,get interrupts(){return interrupts;},async close(){for(const c of sockets.clients)c.terminate();await new Promise<void>(resolve=>sockets.close(()=>resolve()));server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}};
 }

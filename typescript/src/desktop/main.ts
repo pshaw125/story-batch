@@ -2,12 +2,14 @@ import {app,BrowserWindow,clipboard,dialog,ipcMain,Menu,nativeImage,session} fro
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {mkdtempSync,rmSync} from 'node:fs';
-import {access,readFile,writeFile,mkdir} from 'node:fs/promises';
+import {access,readFile,writeFile,mkdir,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {DesktopSession} from '../node/desktop-session';
 import {configuredRuntime,syntheticRuntime} from '../node/runtime';
 import {MetapromptFiles} from '../node/metaprompt-files';
 import {hostProbe} from '../node/host-probe';
+import {inspectSwiftBatch} from '../node/legacy-import';
+import type {LoRA} from '../core/recipes';
 import {DraftStore} from '../node/draft-store';
 import type {DraftSnapshot,VariantChange} from '../core/desktop';
 const nativeSmoke=process.argv.includes('--native-ui-smoke');
@@ -21,7 +23,7 @@ const documents=new MetapromptFiles();
 let readyToQuit=false,closing=false;
 const drafts=new DraftStore(join(app.getPath('userData'),'session.json'),error=>command('error:Draft autosave failed: '+String(error)));
 async function shutdown():Promise<void>{
-  if(window&&!window.isDestroyed()){const snapshot=await window.webContents.executeJavaScript('window.storyBatchDraft?.()');if(snapshot)drafts.save(snapshot);}
+  if(window&&!window.isDestroyed()){const snapshot=await window.webContents.executeJavaScript('window.storyBatchDraft?.()');if(snapshot)drafts.save({...snapshot,tools:desktop?.state().tools});}
   await desktop?.stop();drafts.save({...drafts.snapshot(),lastBatch:desktop?.state().folder??null});await drafts.flush();
 }
 const page=pathToFileURL(join(__dirname,'index.html')).href;
@@ -46,7 +48,7 @@ app.whenReady().then(async()=>{
     if(!config){const candidate=join(app.getAppPath(),'renderer.local.json');try{await access(candidate);config=candidate;}catch{/* No implicit renderer selection. */}}
     if(config){try{await desktop.setRuntime(await configuredRuntime(config,join(settings.outputRoot,'.attempts')));settings.configPath=config;}catch(error){startupError=String(error);}}
   }
-  try{const draft=await drafts.load();if(draft.lastBatch)await desktop.load(draft.lastBatch);}catch(error){startupError=[startupError,String(error)].filter(Boolean).join('\n');}
+  try{const draft=await drafts.load();if(draft.lastBatch)await desktop.load(draft.lastBatch);if(draft.tools)await desktop.restoreTools(draft.tools);}catch(error){startupError=[startupError,String(error)].filter(Boolean).join('\n');}
   await desktop.refreshFavorites();
   session.defaultSession.setPermissionRequestHandler((_web,_permission,callback)=>callback(false));
   session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{
@@ -61,13 +63,24 @@ app.whenReady().then(async()=>{
     if(event.sender!==window?.webContents||event.senderFrame!==window.webContents.mainFrame||event.senderFrame.url!==page)throw new Error('Untrusted IPC sender.');
     return action(...args);
   });
+  const normalizeCanvas=(bytes:Uint8Array):Uint8Array=>{if(bytes.length>128*1024*1024)throw new Error('Input file exceeds 128 MB.');const image=nativeImage.createFromBuffer(Buffer.from(bytes));if(image.isEmpty())throw new Error('Image format could not be decoded; use PNG or JPEG.');const size=image.getSize();if(size.width*size.height>64*1024*1024)throw new Error('Canvas exceeds 64 megapixels.');return image.toPNG();};
+  handle('choose-canvas',async()=>{const selected=await dialog.showOpenDialog(window!,{title:'Choose image-to-image canvas',properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp','bmp','gif']}]});if(selected.canceled)return null;const path=selected.filePaths[0];if((await stat(path)).size>128*1024*1024)throw new Error('Input file exceeds 128 MB.');return desktop!.selectCanvas(normalizeCanvas(await readFile(path)),{originalPath:path,prompt:''});});
+  handle('use-canvas',image=>desktop!.useCanvas(id(image),normalizeCanvas));
+  handle('clear-canvas',()=>desktop!.clearCanvas());
+  handle('canvas-options',options=>desktop!.canvasOptions(options as Parameters<DesktopSession['canvasOptions']>[0]));
+  handle('set-loras',loras=>{if(!Array.isArray(loras)||loras.length>64)throw new Error('Choose at most 64 LoRAs.');return desktop!.setLoras(loras as LoRA[]);});
+  handle('native-text-copy',image=>desktop!.nativeTextCopy(id(image)));
+  let importChoice:Awaited<ReturnType<typeof inspectSwiftBatch>>|null=null,importSelections:string|undefined,importFavorites:string|undefined;
+  handle('inspect-import',async()=>{if(desktop!.state().busy)throw new Error('Stop the active batch before importing.');const selected=await dialog.showOpenDialog(window!,{title:'Choose Swift batch to copy',properties:['openDirectory']});if(selected.canceled)return null;importChoice=await inspectSwiftBatch(selected.filePaths[0]);importSelections=undefined;importFavorites=undefined;return importChoice;});
+  handle('choose-import-part',async kind=>{if(!importChoice||!['selections','favorites'].includes(String(kind)))throw new Error('Choose a Swift batch first.');const selected=await dialog.showOpenDialog(window!,kind==='selections'?{title:'Choose Swift image-selections.json',properties:['openFile'],filters:[{name:'Selections',extensions:['json']}]}:{title:'Choose Swift _favorites folder',properties:['openDirectory']});if(selected.canceled)return null;const path=selected.filePaths[0];if(kind==='selections')importSelections=path;else importFavorites=path;return path;});
+  handle('import-swift',mapping=>{if(!importChoice||!mapping||typeof mapping!=='object'||(mapping as {from:string}).from!==importChoice.originalFolder||(mapping as {to:string}).to!==importChoice.folder)throw new Error('Confirm the selected batch path mapping.');return desktop!.importSwift({folder:importChoice.folder,mapping:mapping as {from:string;to:string},selectionsFile:importSelections,favoritesFolder:importFavorites});});
   handle('state',()=>desktop!.state());
   handle('preview',text=>desktop!.preview(source(text)));
   handle('queue',(text,newBatch)=>{if(typeof newBatch!=='boolean')throw new Error('Invalid batch mode.');return desktop!.queue(source(text),newBatch);});
   handle('stop',()=>desktop!.stop());
   handle('variant',(image,change,shortlist)=>{if(!change||typeof change!=='object'||Object.keys(change).length!==1)throw new Error('Choose one variant adjustment.');if(typeof shortlist!=='boolean')throw new Error('Invalid shortlist mode.');return desktop!.queueVariant(id(image),change as VariantChange,shortlist);});
   handle('draft',()=>drafts.snapshot());
-  handle('save-draft',snapshot=>{drafts.save({...snapshot as DraftSnapshot,lastBatch:desktop!.state().folder});});
+  handle('save-draft',snapshot=>{drafts.save({...snapshot as DraftSnapshot,lastBatch:desktop!.state().folder,tools:desktop!.state().tools});});
   handle('skip',image=>desktop!.skip(id(image)));
   handle('stop-after',()=>desktop!.stopAfter());
   handle('reorder',(image,direction)=>desktop!.reorder(id(image),direction as 'up'|'down'|'next'));
