@@ -1,0 +1,11 @@
+{
+  "executablePath": "/absolute/path/to/draw-things-cli",
+  "recipe": {
+    "model": "z_image_turbo_1.0_q6p.ckpt",
+    "sampler": 17,
+    "seedMode": 2,
+    "guidanceScale": 1,
+    "resolutionDependentShift": false,
+    "loras": []
+  }
+}
