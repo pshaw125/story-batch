@@ -3,8 +3,8 @@ import { validateRecipe } from './recipes';
 import { shiftValue } from './arithmetic';
 import { requireThat } from './errors';
 import { JobStatus, NativeObservations } from './renderer';
-export interface ImageRecord { observations?: NativeObservations; cached?: boolean; rendererElapsedMs?: number; effectiveJob?: ImageJob; jobId: string; status: JobStatus; attempts: number; elapsedMs: number | null; output: string | null; error: string | null }
-export interface BatchReport { editorSource?: string; schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
+export interface ImageRecord { executionIndex?:number;startedAt?:string;finishedAt?:string; observations?: NativeObservations; cached?: boolean; rendererElapsedMs?: number; effectiveJob?: ImageJob; jobId: string; status: JobStatus; attempts: number; elapsedMs: number | null; output: string | null; error: string | null }
+export interface BatchReport { selections?:Record<string,{shortlisted:boolean;rejected:boolean}>;queueOrder?:string[]; editorSource?: string; schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
 export function validateJob(job: ImageJob): void {
   requireThat(job?.schemaVersion === 1 && [job.id, job.batchId, job.runId, job.title, job.filename].every(v => typeof v === 'string' && v.trim()), 'Invalid image identity.');
   requireThat(typeof job.prompt === 'string' && typeof job.source === 'string' && typeof job.notes === 'string', 'Invalid prompt snapshot.');
@@ -33,11 +33,16 @@ export function validateReport(value: BatchReport): void {
     requireThat(!ids.has(job.id) && !numbers.has(job.number) && !names.has(job.filename), 'Duplicate image identity.');
     ids.add(job.id); numbers.add(job.number); names.add(job.filename);
   }
+  if(value.selections!==undefined){requireThat(value.selections&&typeof value.selections==='object'&&!Array.isArray(value.selections),'Invalid selections.');for(const [id,selection]of Object.entries(value.selections))requireThat(ids.has(id)&&typeof selection.shortlisted==='boolean'&&typeof selection.rejected==='boolean','Invalid selection identity/flags.');}
+  if(value.queueOrder!==undefined)requireThat(Array.isArray(value.queueOrder)&&new Set(value.queueOrder).size===value.queueOrder.length&&value.queueOrder.every(id=>ids.has(id)),'Invalid saved queue order.');
+  const executionIndices=new Set<number>();
   const recordIds = new Set<string>(), jobsById = new Map(b.jobs.map(j => [j.id, j]));
   for (const r of value.records) {
     requireThat(ids.has(r.jobId) && !recordIds.has(r.jobId) && ['queued','running','completed','cancelled','failed','unknown'].includes(r.status), 'Invalid record identity/status.'); recordIds.add(r.jobId);
     requireThat(Number.isSafeInteger(r.attempts) && r.attempts >= 0 && r.attempts <= 2 && (r.elapsedMs === null || Number.isFinite(r.elapsedMs) && r.elapsedMs >= 0), 'Invalid attempt/timing.');
     const job = jobsById.get(r.jobId)!;
+    if(r.executionIndex!==undefined){requireThat(Number.isSafeInteger(r.executionIndex)&&r.executionIndex>0&&!executionIndices.has(r.executionIndex),'Invalid execution order.');executionIndices.add(r.executionIndex);}
+    for(const timestamp of [r.startedAt,r.finishedAt])requireThat(timestamp===undefined||typeof timestamp==='string'&&!Number.isNaN(Date.parse(timestamp)),'Invalid execution timestamp.');
     requireThat(r.output === null || r.output === job.filename, 'Output differs from planned filename.');
     requireThat(r.error === null || typeof r.error === 'string', 'Invalid record error.');
     requireThat(r.status !== 'completed' || r.output === job.filename, 'Completed image needs an output identity.');
@@ -54,6 +59,7 @@ export function appendRound(report: BatchReport, round: FrozenBatch, updateEdito
   requireThat(round.jobs.every((j, i) => j.number === last + i + 1), 'Continuation numbering must follow existing jobs.');
   const result: BatchReport = {
     schemaVersion: 1,
+    selections:structuredClone(report.selections??{}),queueOrder:structuredClone(report.queueOrder??[]),
     editorSource: updateEditorSource ? round.jobs[0]?.source ?? report.editorSource : report.editorSource ?? report.batch.jobs.at(-1)?.source,
     batch: { ...structuredClone(report.batch), jobs: [...structuredClone(report.batch.jobs), ...structuredClone(round.jobs)] },
     runs: [...structuredClone(report.runs), structuredClone(round.run)],

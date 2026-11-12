@@ -3,13 +3,31 @@ import {compile} from '../../core/prompt';
 import {Editor} from './editor';
 import {Gallery} from './gallery';
 import {Viewer} from './viewer';
+import {Find} from './find';
+import type {GalleryScope,ImageSort} from '../../core/gallery';
+import {params} from './gallery';
 const editor=new Editor();
 let state:DesktopState|null=null,previewSource:string|null=null,previewConsumed=false;
 const feedback=document.querySelector<HTMLElement>('#feedback')!;
 function showError(message:string):void {feedback.textContent=message;feedback.hidden=false;}
 function clearError():void {feedback.hidden=true;feedback.textContent='';}
-const viewer=new Viewer(showError),gallery=new Gallery(id=>viewer.open(id),showError);
-function tab(name:string):void {for(const button of document.querySelectorAll<HTMLButtonElement>('[data-tab]'))button.setAttribute('aria-pressed',String(button.dataset.tab===name));for(const value of ['preview','images','queue','activity'])(document.querySelector(`#${value}-pane`) as HTMLElement).hidden=value!==name;}
+let scope:GalleryScope='images',sort:ImageSort='seeded';
+const find=new Find(editor);
+function persist():void{if(state)void window.storyBatch.saveDraft(window.storyBatchDraft!()).catch(e=>showError(String(e)));}
+window.storyBatchDraft=()=>({source:editor.source(),lastBatch:state?.folder??null,scope,sort});
+function imageAction(id:string,kind:'shortlisted'|'favorite'|'rejected'):void{void action(async()=>update(await(kind==='favorite'?window.storyBatch.favorite(id):window.storyBatch.selection(id,kind))));}
+function setSort(value:ImageSort):void{sort=value;if(state)update(state);persist();}
+const viewer=new Viewer(showError,imageAction,setSort,id=>void action(async()=>{const result=await window.storyBatch.openFavoriteSource(id);editor.load(result.source);resetPreview();update(result.state);tab('images');viewer.open(result.imageId);}));
+const gallery=new Gallery(id=>viewer.open(id),showError,imageAction);
+function tab(name:string):void {
+  const collection=['images','shortlist','favorites','rejected'].includes(name);
+  if(collection)scope=name as GalleryScope;
+  for(const button of document.querySelectorAll<HTMLButtonElement>('[data-tab]'))button.setAttribute('aria-pressed',String(button.dataset.tab===name));
+  for(const value of ['preview','images','queue','activity'])(document.querySelector(`#${value}-pane`) as HTMLElement).hidden=value!==(collection?'images':name);
+  (document.querySelector('#refresh-favorites') as HTMLElement).hidden=scope!=='favorites';
+  if(state){gallery.update(state,scope,sort);viewer.update(state,scope,sort);}persist();
+  if(name==='favorites')void window.storyBatch.refreshFavorites().then(update).catch(e=>showError(String(e)));
+}
 function validate():void {
   const text=document.querySelector<HTMLElement>('#validation')!;
   let valid=false,title:string|null=null;
@@ -29,16 +47,25 @@ function update(value:DesktopState):void {
   document.querySelector('#image-count')!.textContent=value.images.filter(i=>i.status==='completed').length.toString();document.querySelector('#queue-count')!.textContent=value.images.filter(i=>['queued','running','unknown'].includes(i.status)).length.toString();
   (document.querySelector('#stop') as HTMLButtonElement).disabled=!value.busy||value.stopping;(document.querySelector('#stop') as HTMLButtonElement).textContent=value.stopping?'Stopping…':'Stop Batch';
   for(const id of ['configure','synthetic','output-folder','open-batch'])(document.querySelector('#'+id) as HTMLButtonElement).disabled=value.busy;
-  gallery.update(value);viewer.update(value);
+  gallery.update(value,scope,sort);viewer.update(value,scope,sort);
+  (document.querySelector('#gallery-sort') as HTMLSelectElement).value=sort;
+  (document.querySelector('#stop-after') as HTMLButtonElement).disabled=!value.busy||value.stopping;
+  for(const id of ['collect-seeds','collect-shifts'])(document.querySelector('#'+id) as HTMLButtonElement).disabled=value.busy||!value.lastRunCount;
   const queue=document.querySelector('#queue-list')!;queue.replaceChildren();
-  for(const item of value.images.filter(i=>['queued','running','unknown'].includes(i.status))){const row=document.createElement('div');row.className='queue-row';const name=document.createElement('strong');name.textContent=item.filename;const meta=document.createElement('div');meta.className='image-params';meta.textContent=`${item.width}×${item.height} · Seed ${item.seed} · Shift ${item.shift} · Steps ${item.steps} · ${item.status}`;row.append(name,meta);queue.append(row);}
+  const queuedIds=[...(value.activeId?[value.activeId]:[]),...value.waiting];
+  for(const id of [...new Set(queuedIds)]){const item=value.images.find(i=>i.id===id);if(!item)continue;const row=document.createElement('div');row.className='queue-row';row.dataset.id=id;const name=document.createElement('strong');name.textContent=item.filename;const meta=document.createElement('div');meta.className='image-params';meta.textContent=params(item)+' · '+item.status;row.append(name,meta);
+    const controls=document.createElement('div');controls.className='toolbar';const add=(label:string,title:string,run:()=>Promise<DesktopState>,disabled=false)=>{const b=document.createElement('button');b.textContent=label;b.title=title;b.disabled=disabled||value.stopping;b.addEventListener('click',()=>void action(async()=>update(await run())));controls.append(b);};
+    if(id===value.activeId)add('Skip current','Cancel only this image',()=>window.storyBatch.skip(id),!['queued','running'].includes(item.status));
+    else{const index=value.waiting.indexOf(id);add('↑','Move up',()=>window.storyBatch.reorder(id,'up'),index===0);add('↓','Move down',()=>window.storyBatch.reorder(id,'down'),index===value.waiting.length-1);add('⏭','Run next',()=>window.storyBatch.reorder(id,'next'),index===0);add('Cancel','Remove waiting image',()=>window.storyBatch.cancelQueued(id));}
+    row.append(controls);queue.append(row);
+  }
   if(!queue.childElementCount){const empty=document.createElement('p');empty.className='empty';empty.textContent='No queued work.';queue.append(empty);}
   document.querySelector('#activity-log')!.textContent=value.activity.join('\n');
   const current=value.images.find(i=>i.id===value.activeId),progress=document.querySelector<HTMLProgressElement>('#progress')!;
   progress.max=value.progress?.total??1;progress.value=value.progress?.completed??0;
   document.querySelector('#status-text')!.textContent=current&&value.busy?`${current.filename}${value.progress?` · ${value.progress.completed}/${value.progress.total}`:''}`:`${value.stopping?'Stopping':value.busy?'Preparing':value.uncertain?'Renderer status unresolved':'Ready'} · ${value.images.filter(i=>i.status==='completed').length} completed`;
   document.querySelector('#active-params')!.textContent=current&&value.busy?`Seed ${current.seed} · Shift ${current.shift} · Steps ${current.steps}`:'';
-  if(value.error)showError(value.error);validate();
+  if(value.error)showError(value.error);validate();persist();
 }
 function showPreview(result:PreviewResult):void {
   const root=document.querySelector('#preview-content')!;root.replaceChildren();
@@ -47,9 +74,9 @@ function showPreview(result:PreviewResult):void {
 }
 async function action(task:()=>Promise<void>):Promise<void>{clearError();try{await task();}catch(e){showError(String(e));}}
 function resetPreview():void {previewSource=null;previewConsumed=false;const p=document.createElement('p');p.className='empty';p.textContent='Resolve a preview to inspect the exact prompts and parameters before queueing.';document.querySelector('#preview-content')!.replaceChildren(p);}
-async function open():Promise<void>{const result=await window.storyBatch.openPrompt();if(result){editor.load(result.source);resetPreview();validate();}}
+async function open():Promise<void>{const result=await window.storyBatch.openPrompt();if(result){editor.load(result.source);resetPreview();validate();find.refresh();persist();}}
 async function save(saveAs=false):Promise<void>{await window.storyBatch.savePrompt(editor.source(),saveAs);}
-editor.onChange(()=>{clearError();validate();});
+editor.onChange(()=>{clearError();validate();persist();});
 for(const button of document.querySelectorAll<HTMLButtonElement>('[data-tab]'))button.addEventListener('click',()=>tab(button.dataset.tab!));
 document.querySelector('#preview')!.addEventListener('click',()=>void action(async()=>{const source=editor.source(),result=await window.storyBatch.preview(source);if(source!==editor.source())return;previewSource=source;previewConsumed=false;showPreview(result);validate();tab('preview');}));
 for(const [id,newBatch] of [['queue',false],['new-batch',true]] as const)document.querySelector('#'+id)!.addEventListener('click',()=>void action(async()=>{update(await window.storyBatch.queue(editor.source(),newBatch));previewConsumed=true;validate();tab('images');}));
@@ -59,5 +86,11 @@ document.querySelector('#synthetic')!.addEventListener('click',()=>void action(a
 document.querySelector('#output-folder')!.addEventListener('click',()=>void action(async()=>{const result=await window.storyBatch.chooseOutput();if(result)update(result);}));
 document.querySelector('#open-prompt')!.addEventListener('click',()=>void action(open));document.querySelector('#save-prompt')!.addEventListener('click',()=>void action(()=>save()));document.querySelector('#save-as')!.addEventListener('click',()=>void action(()=>save(true)));
 document.querySelector('#open-batch')!.addEventListener('click',()=>void action(async()=>{const result=await window.storyBatch.openBatch();if(result){editor.load(result.source);resetPreview();update(result.state);tab('images');}}));
-window.storyBatch.onCommand(command=>{if(command.startsWith('error:'))showError(command.slice(6));else if(command==='open')void action(open);else if(command==='save')void action(()=>save());else if(command==='save-as')void action(()=>save(true));});
-window.storyBatch.onState(update);void window.storyBatch.state().then(update).catch(e=>showError(String(e)));
+window.storyBatch.onCommand(command=>{if(command==='find')find.open();else if(command==='find-next')find.next(1);else if(command==='find-previous')find.next(-1);else if(command.startsWith('error:'))showError(command.slice(6));else if(command==='open')void action(open);else if(command==='save')void action(()=>save());else if(command==='save-as')void action(()=>save(true));});
+window.storyBatch.onState(update);void Promise.all([window.storyBatch.state(),window.storyBatch.draft()]).then(([value,draft])=>{editor.load(draft.source);scope=draft.scope;sort=draft.sort;update(value);tab(scope);find.refresh();}).catch(e=>showError(String(e)));
+window.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==='f'){e.preventDefault();find.open();}else if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==='g'){e.preventDefault();find.next(e.shiftKey?-1:1);}});
+
+document.querySelector('#stop-after')!.addEventListener('click',()=>void action(async()=>update(await window.storyBatch.stopAfter())));
+document.querySelector('#gallery-sort')!.addEventListener('change',e=>setSort((e.target as HTMLSelectElement).value as ImageSort));
+document.querySelector('#refresh-favorites')!.addEventListener('click',()=>void action(async()=>update(await window.storyBatch.refreshFavorites())));
+for(const [id,kind] of [['collect-seeds','seeds'],['collect-shifts','shift']] as const)document.querySelector('#'+id)!.addEventListener('click',()=>void action(async()=>{const before=editor.source(),result=await window.storyBatch.collect(before,kind);if(before!==editor.source())throw new Error('Draft changed during collection; collect again.');editor.replaceParameters(result);find.refresh();validate();persist();}));

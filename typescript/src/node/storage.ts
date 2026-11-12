@@ -59,6 +59,20 @@ export class ReportStore {
       return previous;
     });
   }
+  async claim(id:string):Promise<ImageRecord>{
+    let claimed:ImageRecord|undefined;
+    await this.change(previous=>{
+      requireThat(previous,'Batch report is missing.');const record=previous.records.find(r=>r.jobId===id);requireThat(record?.status==='queued','Image is already claimed or unavailable.');
+      const index=previous.records.reduce((n,r)=>Math.max(n,r.executionIndex??(r.attempts>0?previous.batch.jobs.find(j=>j.id===r.jobId)!.number:0)),0)+1;
+      record.executionIndex=index;record.startedAt=new Date().toISOString();record.status='running';claimed=structuredClone(record);return previous;
+    });return claimed!;
+  }
+  selection(id:string,kind:'shortlisted'|'rejected',value:boolean):Promise<void>{return this.change(previous=>{
+    requireThat(previous&&previous.batch.jobs.some(j=>j.id===id),'Unknown selection image.');
+    previous.selections??={};const flags=previous.selections[id]??{shortlisted:false,rejected:false};flags[kind]=value;
+    if(flags.shortlisted||flags.rejected)previous.selections[id]=flags;else delete previous.selections[id];return previous;
+  });}
+  queueOrder(ids:readonly string[]):Promise<void>{return this.change(previous=>{requireThat(previous,'Batch report is missing.');previous.queueOrder=[...ids];return previous;});}
   async writeOutput(job: ImageJob, bytes: Uint8Array): Promise<void> {
     validateJob(job);
     requireThat(bytes.length >= 8 && [137,80,78,71,13,10,26,10].every((v, i) => bytes[i] === v), 'Invalid PNG signature.');

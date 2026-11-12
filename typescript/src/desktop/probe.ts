@@ -30,6 +30,7 @@ export async function runDesktopProbe(window:BrowserWindow,desktop:DesktopSessio
   const state=desktop.state();if(!state.folder)throw new Error('No saved batch');
   const reopened=await desktop.load(state.folder);if(reopened.state.busy)throw new Error('Reload resumed saved work');
   const file=join(root,'synthetic-metaprompt.txt');await writeFile(file,reopened.source);if((await readFile(file,'utf8'))!==reopened.source)throw new Error('Metaprompt round trip failed');
+  const iteration=await (await import('./probe-iteration')).iterationProbe(window,desktop,root);
   const before=await window.webContents.executeJavaScript(`(()=>{const input=document.querySelector('#prompt');input.focus();const before=input.value;input.setSelectionRange(input.value.length,input.value.length);document.execCommand('insertText',false,' undo-check');return before;})()`);
   window.webContents.undo();
   await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
@@ -37,7 +38,8 @@ export async function runDesktopProbe(window:BrowserWindow,desktop:DesktopSessio
   window.webContents.redo();await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
   if(await window.webContents.executeJavaScript("document.querySelector('#prompt').value")!==before+' undo-check')throw new Error('Native text redo failed');
   window.webContents.undo();await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
+  if(process.env.STORYBATCH_PROBE_SCREENSHOT)await window.webContents.executeJavaScript(`(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',metaKey:true,bubbles:true}));const input=document.querySelector('#find-input');input.value='unfinished';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   const screenshot=await window.webContents.capturePage();await writeFile(join(root,'ui.png'),screenshot.toPNG());
   if(process.env.STORYBATCH_PROBE_SCREENSHOT)await writeFile(process.env.STORYBATCH_PROBE_SCREENSHOT,screenshot.toPNG());
-  return {...checks,reload:true,metapromptFileRoundTrip:true,nativeUndoRedo:true};
+  return {...checks,...iteration,reload:true,metapromptFileRoundTrip:true,nativeUndoRedo:true};
 }

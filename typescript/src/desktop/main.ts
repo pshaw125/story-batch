@@ -8,7 +8,8 @@ import {DesktopSession} from '../node/desktop-session';
 import {configuredRuntime,syntheticRuntime} from '../node/runtime';
 import {MetapromptFiles} from '../node/metaprompt-files';
 import {hostProbe} from '../node/host-probe';
-import type {VariantChange} from '../core/desktop';
+import {DraftStore} from '../node/draft-store';
+import type {DraftSnapshot,VariantChange} from '../core/desktop';
 const nativeSmoke=process.argv.includes('--native-ui-smoke');
 const probeMode=process.argv.includes('--host-probe')||nativeSmoke;
 app.setName('Story Batch');
@@ -17,7 +18,12 @@ app.setPath('userData',probeDirectory??join(app.getPath('appData'),'story-batch-
 app.commandLine.appendSwitch('disable-background-networking');
 let window:BrowserWindow|null=null,desktop:DesktopSession|null=null;
 const documents=new MetapromptFiles();
-let readyToQuit=false;
+let readyToQuit=false,closing=false;
+const drafts=new DraftStore(join(app.getPath('userData'),'session.json'),error=>command('error:Draft autosave failed: '+String(error)));
+async function shutdown():Promise<void>{
+  if(window&&!window.isDestroyed()){const snapshot=await window.webContents.executeJavaScript('window.storyBatchDraft?.()');if(snapshot)drafts.save(snapshot);}
+  await desktop?.stop();drafts.save({...drafts.snapshot(),lastBatch:desktop?.state().folder??null});await drafts.flush();
+}
 const page=pathToFileURL(join(__dirname,'index.html')).href;
 interface Settings {configPath?:string;outputRoot:string;synthetic?:boolean}
 let settings:Settings={outputRoot:join(app.getPath('userData'),'Batches')};
@@ -40,13 +46,15 @@ app.whenReady().then(async()=>{
     if(!config){const candidate=join(app.getAppPath(),'renderer.local.json');try{await access(candidate);config=candidate;}catch{/* No implicit renderer selection. */}}
     if(config){try{await desktop.setRuntime(await configuredRuntime(config,join(settings.outputRoot,'.attempts')));settings.configPath=config;}catch(error){startupError=String(error);}}
   }
+  try{const draft=await drafts.load();if(draft.lastBatch)await desktop.load(draft.lastBatch);}catch(error){startupError=[startupError,String(error)].filter(Boolean).join('\n');}
+  await desktop.refreshFavorites();
   session.defaultSession.setPermissionRequestHandler((_web,_permission,callback)=>callback(false));
   session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{
     const url=new URL(details.url);callback({cancel:!(url.protocol==='data:'&&details.resourceType==='image')&&!(url.protocol==='file:'&&details.url.startsWith(pathToFileURL(__dirname+'/').href))});
   });
   window=new BrowserWindow({width:1400,height:960,minWidth:850,minHeight:620,show:!probeMode,title:'Story Batch',
     webPreferences:{preload:join(__dirname,'preload.js'),sandbox:true,contextIsolation:true,nodeIntegration:false}});
-  window.on('close',event=>{if(desktop?.state().busy){event.preventDefault();void desktop.stop().then(()=>window?.close()).catch(error=>dialog.showErrorBox('Renderer cancellation is unresolved',String(error)));}});
+  window.on('close',event=>{if(readyToQuit)return;event.preventDefault();if(closing)return;closing=true;void shutdown().then(()=>{readyToQuit=true;window?.close();}).catch(error=>{closing=false;dialog.showErrorBox('Could not close safely',String(error));});});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
   desktop.subscribe(state=>{if(window&&!window.isDestroyed())window.webContents.send('state',state);});
   const handle=(name:string,action:(...args:unknown[])=>unknown)=>ipcMain.handle(name,(event,...args:unknown[])=>{
@@ -57,14 +65,25 @@ app.whenReady().then(async()=>{
   handle('preview',text=>desktop!.preview(source(text)));
   handle('queue',(text,newBatch)=>{if(typeof newBatch!=='boolean')throw new Error('Invalid batch mode.');return desktop!.queue(source(text),newBatch);});
   handle('stop',()=>desktop!.stop());
-  handle('variant',(image,change)=>{if(!change||typeof change!=='object'||Object.keys(change).length!==1)throw new Error('Choose one variant adjustment.');return desktop!.queueVariant(id(image),change as VariantChange);});
+  handle('variant',(image,change,shortlist)=>{if(!change||typeof change!=='object'||Object.keys(change).length!==1)throw new Error('Choose one variant adjustment.');if(typeof shortlist!=='boolean')throw new Error('Invalid shortlist mode.');return desktop!.queueVariant(id(image),change as VariantChange,shortlist);});
+  handle('draft',()=>drafts.snapshot());
+  handle('save-draft',snapshot=>{drafts.save({...snapshot as DraftSnapshot,lastBatch:desktop!.state().folder});});
+  handle('skip',image=>desktop!.skip(id(image)));
+  handle('stop-after',()=>desktop!.stopAfter());
+  handle('reorder',(image,direction)=>desktop!.reorder(id(image),direction as 'up'|'down'|'next'));
+  handle('cancel-queued',image=>desktop!.cancelQueued(id(image)));
+  handle('collect',(text,kind)=>{if(kind!=='seeds'&&kind!=='shift')throw new Error('Invalid parameter.');return desktop!.collect(source(text),kind);});
+  handle('selection',(image,kind)=>desktop!.toggleSelection(id(image),kind as 'shortlisted'|'rejected'));
+  handle('favorite',image=>desktop!.toggleFavorite(id(image)));
+  handle('refresh-favorites',()=>desktop!.refreshFavorites());
+  handle('open-favorite-source',image=>desktop!.openFavoriteSource(id(image)));
   handle('recipe',image=>desktop!.recipe(id(image)));
   handle('copy-recipe',image=>clipboard.writeText(JSON.stringify(desktop!.recipe(id(image)),null,2)));
   handle('image',async(image,thumbnail)=>{
     if(typeof thumbnail!=='boolean')throw new Error('Invalid image size request.');
     const bytes=await desktop!.image(id(image));
-    if(!thumbnail)return 'data:image/png;base64,'+Buffer.from(bytes).toString('base64');
-    const decoded=nativeImage.createFromBuffer(Buffer.from(bytes));if(decoded.isEmpty())throw new Error('Image cannot be decoded.');
+    if(!thumbnail)return 'data:'+desktop!.mime(id(image))+';base64,'+Buffer.from(bytes).toString('base64');
+    const decoded=nativeImage.createFromBuffer(Buffer.from(bytes));if(decoded.isEmpty())return 'data:'+desktop!.mime(id(image))+';base64,'+Buffer.from(bytes).toString('base64');
     const size=decoded.getSize(),scale=Math.min(1,360/Math.max(size.width,size.height));
     return decoded.resize({width:Math.max(1,Math.round(size.width*scale)),height:Math.max(1,Math.round(size.height*scale))}).toDataURL();
   });
@@ -99,7 +118,7 @@ app.whenReady().then(async()=>{
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform==='darwin'?[{role:'appMenu' as const}]:[]),
     {label:'File',submenu:[{label:'Open Metaprompt…',accelerator:'CmdOrCtrl+O',click:()=>command('open')},{label:'Save',accelerator:'CmdOrCtrl+S',click:()=>command('save')},{label:'Save As…',accelerator:'CmdOrCtrl+Shift+S',click:()=>command('save-as')},{type:'separator' as const},{role:'close' as const}]},
-    {label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},
+    {label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'},{type:'separator'},{label:'Find…',accelerator:'CmdOrCtrl+F',click:()=>command('find')},{label:'Find next',accelerator:'CmdOrCtrl+G',click:()=>command('find-next')},{label:'Find previous',accelerator:'CmdOrCtrl+Shift+G',click:()=>command('find-previous')}]},
     {role:'windowMenu'}
   ]));
   window.webContents.on('render-process-gone',(_event,details)=>{if(probeMode){console.error(details);app.exit(1);}});
@@ -107,13 +126,12 @@ app.whenReady().then(async()=>{
   if(startupError)window.webContents.send('command','error:'+startupError);
   if(probeMode){
     const checks=nativeSmoke?await (await import('./probe-native')).runNativeDesktopProbe(window,desktop):await (await import('./probe')).runDesktopProbe(window,desktop,probeDirectory!);console.log(JSON.stringify({ok:true,checks,host:await hostProbe()}));
-    await desktop.stop();readyToQuit=true;app.quit();
+    await shutdown();readyToQuit=true;app.quit();
   }
 }).catch(error=>{console.error(error);app.exit(1);});
 if(probeMode)setTimeout(()=>{console.error('Desktop probe timed out.');void (desktop?.stop()??Promise.resolve()).finally(()=>app.exit(1));},nativeSmoke?180000:60000).unref();
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',event=>{
-  if(readyToQuit||!desktop?.state().busy)return;
-  event.preventDefault();void desktop.stop().then(()=>{readyToQuit=true;app.quit();}).catch(error=>dialog.showErrorBox('Renderer cancellation is unresolved',String(error)));
+  if(readyToQuit)return;event.preventDefault();if(closing)return;closing=true;void shutdown().then(()=>{readyToQuit=true;app.quit();}).catch(error=>{closing=false;dialog.showErrorBox('Could not close safely',String(error));});
 });
 app.on('will-quit',()=>{desktop?.close();if(probeDirectory)rmSync(probeDirectory,{recursive:true,force:true});});

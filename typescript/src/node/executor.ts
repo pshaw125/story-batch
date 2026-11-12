@@ -11,9 +11,9 @@ export class BatchExecutor {
   private busy=false;
   private stopped=false;
   private skipped=false;
-  private current:{renderer:Renderer;handle:string|null}|null=null;
+  private current:{renderer:Renderer;handle:string|null;jobId:string}|null=null;
   async stop():Promise<void>{this.stopped=true;if(this.current?.handle)await this.current.renderer.cancel(this.current.handle);}
-  async skip():Promise<void>{if(!this.current)return;this.skipped=true;if(this.current.handle)await this.current.renderer.cancel(this.current.handle);}
+  async skip(expectedId?:string):Promise<void>{if(!this.current||expectedId!==undefined&&this.current.jobId!==expectedId)return;this.skipped=true;if(this.current.handle)await this.current.renderer.cancel(this.current.handle);}
   async execute(batch:FrozenBatch,renderer:Renderer,store:ReportStore,options:ExecutionOptions={}):Promise<BatchReport>{
     if(this.busy)throw new RenderError('An execution is already active.','validation');
     this.busy=true;this.stopped=false;
@@ -23,7 +23,7 @@ export class BatchExecutor {
       if(report.batch.id!==batch.id||!batch.jobs.every(job=>report.batch.jobs.some(j=>JSON.stringify(j)===JSON.stringify(job))&&report.records.find(r=>r.jobId===job.id)?.status==='queued'))throw new RenderError('Execution requires fresh, matching frozen jobs; saved work never resumes implicitly.','validation');
       for(const job of batch.jobs){
         if(this.stopped)break;
-        const record=report.records.find(r=>r.jobId===job.id)!;this.skipped=false;this.current={renderer,handle:null};const start=performance.now();
+        const record=await store.claim(job.id);report.records[report.records.findIndex(r=>r.jobId===job.id)]=record;this.skipped=false;this.current={renderer,handle:null,jobId:job.id};const start=performance.now();
         for(const attempt of [1,2] as const){
           if(this.stopped||this.skipped){record.status='cancelled';break;}
           record.attempts=attempt;record.status='running';await store.updateRecords([record]);
@@ -60,7 +60,7 @@ export class BatchExecutor {
             record.status=failure.kind==='uncertain'?'unknown':'failed';this.stopped=true;break;
           }
         }
-        record.elapsedMs=performance.now()-start;
+        record.elapsedMs=performance.now()-start;record.finishedAt=new Date().toISOString();
         if(record.status==='completed')record.error=null;
         await store.updateRecords([record]);options.onComplete?.(structuredClone(record));if(this.current?.handle)renderer.release?.(this.current.handle);this.current=null;
       }
