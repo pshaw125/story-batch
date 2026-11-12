@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Story Batch — TypeScript Phase 1</title><link rel="stylesheet" href="style.css"></head>
+<body><main><h1>Story Batch · Phase 1</h1><p>Host and shared-core spike. Fake output only; no image model is invoked. Your Swift batches remain separate.</p>
+<label for="source">Portable metaprompt</label><textarea id="source" spellcheck="false"></textarea>
+<div class="actions"><button id="preview">Resolve preview</button><button id="run">Run synthetic batch</button><button id="cancel">Cancel synthetic batch</button><button id="probe">Test host access</button></div>
+<pre id="output" aria-live="polite">Ready. Preview resolves parameters and fragments; synthetic jobs test persistence and cancellation.</pre></main><script src="renderer.js"></script></body></html>

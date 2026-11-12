@@ -1,0 +1,31 @@
+name: TypeScript contracts and host
+on:
+  push:
+    paths: ['typescript/**', '.github/workflows/typescript.yml']
+  pull_request:
+    paths: ['typescript/**', '.github/workflows/typescript.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  phase-one:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - run: npm run setup:electron
+      - run: npm test
+      - run: npm run host:probe
+      - run: npm run package

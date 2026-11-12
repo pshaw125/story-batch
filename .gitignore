@@ -137,3 +137,23 @@ fastlane/test_output
 **/*.npz
 **/*.tar
 **/*.gz
+
+# Shared TypeScript source. Only reviewed manifests/configs bypass JSON exclusion.
+!/typescript/
+/typescript/*
+!/typescript/package.json
+!/typescript/package-lock.json
+!/typescript/tsconfig.json
+!/typescript/src/
+!/typescript/test/
+!/typescript/scripts/
+!/typescript/README.md
+**/node_modules/
+**/artifacts/
+
+# Cross-platform verification only; no workflow secrets or artifacts.
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/typescript.yml

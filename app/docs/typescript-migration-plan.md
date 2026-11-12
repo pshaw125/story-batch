@@ -1,10 +1,10 @@
 # TypeScript migration plan
 
-Status: phase 0 approved; implementation has not started. Updated 2026-11-11.
+Status: phase 0 approved; Phase 1 implemented and Mac-verified, with Windows verification pending. Updated 2026-11-11. See [Phase 1 evidence](typescript-phase-1.md).
 
 The target is a shared TypeScript application with Windows ComfyUI and macOS Draw Things CLI adapters. The committed Swift app remains the working reference and fallback. Windows can become the workhorse once useful batches are proven; full Mac UI parity and advanced gestures do not gate that milestone.
 
-TypeScript is the owner's selected direction, including its relevance beyond this personal project. The desktop host/UI framework is not selected. Electron is the initial host-spike candidate; no scaffolding or dependencies are added by this plan.
+TypeScript is the owner's selected direction, including its relevance beyond this personal project. The [host decision](typescript-host-decision.md) selects Electron and a plain TypeScript DOM UI for the Phase 1 spike. Any richer UI framework is deferred. The Swift app remains the shipped reference.
 
 ## Priorities and feature inventory
 
@@ -123,4 +123,4 @@ Phases 0–1 and phase-2 contract checks can proceed before the new GPU arrives.
 
 For every phase, record delivered features, test/build environments, artifact/commit references, deviations and remaining gates. Store private prompts/results in ignored local test folders; repository evidence uses synthetic fixtures and nonprivate summaries. Hardware evidence can remain pending while other work is complete. Only passed gates are marked complete.
 
-This planning baseline defines scope; port implementation, dependency/model procurement and real image generation are separate work.
+The Phase 1 implementation and verification status are recorded in [its progress report](typescript-phase-1.md). Later phases and real image generation retain their own gates; a fake host probe is not native renderer readiness.
