@@ -1,6 +1,6 @@
 # TypeScript migration plan
 
-Status: phase 0 approved; Phase 1 implemented and Mac-verified; Phase 2 adapter contracts implemented and Mac Draw Things image/cancellation/offline checks passed; Windows/ComfyUI native image proof remains pending. Windows verification remains pending. Updated 2026-11-11. See [Phase 1 evidence](typescript-phase-1.md) and [Phase 2 evidence](typescript-phase-2.md).
+Status: phase 0 approved; Phase 1 implemented and Mac-verified; Phase 2 adapter contracts implemented and Mac Draw Things image/cancellation/offline checks passed; Windows/ComfyUI native image proof remains pending. Phase 3 desktop UI is implemented and Mac-verified; Windows workhorse acceptance remains pending. Updated 2026-11-12. See [Phase 1 evidence](typescript-phase-1.md), [Phase 2 evidence](typescript-phase-2.md) and [Phase 3 evidence](typescript-phase-3.md).
 
 The target is a shared TypeScript application with Windows ComfyUI and macOS Draw Things CLI adapters. The committed Swift app remains the working reference and fallback. Windows can become the workhorse once useful batches are proven; full Mac UI parity and advanced gestures do not gate that milestone.
 

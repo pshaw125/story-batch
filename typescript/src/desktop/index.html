@@ -1,8 +1,29 @@
 <!doctype html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
-<title>Story Batch — TypeScript Phase 1</title><link rel="stylesheet" href="style.css"></head>
-<body><main><h1>Story Batch · Phase 1</h1><p>Host and shared-core spike. Fake output only; no image model is invoked. Your Swift batches remain separate.</p>
-<label for="source">Portable metaprompt</label><textarea id="source" spellcheck="false"></textarea>
-<div class="actions"><button id="preview">Resolve preview</button><button id="run">Run synthetic batch</button><button id="cancel">Cancel synthetic batch</button><button id="probe">Test host access</button></div>
-<pre id="output" aria-live="polite">Ready. Preview resolves parameters and fragments; synthetic jobs test persistence and cancellation.</pre></main><script src="renderer.js"></script></body></html>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Story Batch</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header class="app-header"><div><h1>Story Batch</h1><span id="renderer-label">No renderer selected</span></div><div class="toolbar"><button id="configure">Renderer configuration…</button><button id="synthetic">Use synthetic</button><button id="output-folder">Output folder…</button></div></header>
+<main class="workspace">
+<section class="editor-pane" aria-label="Metaprompt editor">
+<div class="section-heading"><h2>Metaprompt</h2><div class="toolbar"><button id="open-prompt">Open…</button><button id="save-prompt">Save</button><button id="save-as">Save as…</button></div></div>
+<label for="parameters">Parameters</label><input id="parameters" type="text" spellcheck="false" aria-describedby="validation">
+<label for="prompt">Prompt</label><textarea id="prompt" spellcheck="false" placeholder="Describe the image. Use [FIELD] for a shared field or [FIELD*] for a fresh choice."></textarea>
+<details open><summary>Fields</summary><textarea id="fields" spellcheck="false" aria-label="Field definitions" placeholder="COLOR={red|blue}"></textarea></details>
+<div id="validation" role="status"></div>
+<div class="generation-actions"><button id="preview">Resolve preview</button><button id="queue" class="primary">Generate</button><button id="new-batch">New Batch</button><button id="stop" class="danger" disabled>Stop Batch</button></div>
+<div id="feedback" role="alert" class="feedback" hidden></div>
+</section>
+<section class="results-pane" aria-label="Batch results">
+<div class="section-heading batch-heading"><div><h2 id="batch-title">No batch open</h2><p id="batch-folder" class="muted"></p></div><button id="open-batch">Open batch…</button></div>
+<nav class="tabs" aria-label="Batch views"><button data-tab="preview" aria-pressed="true">Preview</button><button data-tab="images" aria-pressed="false">Images <span id="image-count"></span></button><button data-tab="queue" aria-pressed="false">Queue <span id="queue-count"></span></button><button data-tab="activity" aria-pressed="false">Activity</button></nav>
+<div id="preview-pane" class="tab-pane"><p id="preview-notice" class="muted" role="status" hidden></p><div id="preview-content"><p class="empty">Resolve a preview to inspect the exact prompts and parameters before queueing.</p></div></div>
+<div id="images-pane" class="tab-pane" hidden><div id="gallery" class="image-grid"></div><p id="gallery-empty" class="empty">Completed images and queued work appear here.</p></div>
+<div id="queue-pane" class="tab-pane" hidden><div id="queue-list"></div></div>
+<div id="activity-pane" class="tab-pane" hidden><pre id="activity-log"></pre></div>
+</section>
+</main>
+<footer class="status-bar"><progress id="progress" value="0" max="1"></progress><span id="status-text">Ready</span><span id="active-params"></span></footer>
+<dialog id="viewer" class="viewer"><div class="viewer-layout"><header class="viewer-toolbar"><div class="toolbar"><button id="previous" aria-label="Previous image">←</button><span id="viewer-index"></span><button id="next" aria-label="Next image">→</button></div><span id="viewer-name"></span><div class="toolbar"><button id="recipe">Prompt &amp; parameters</button><button id="close-viewer">Close</button></div></header><div class="viewer-image-pane"><img id="viewer-image" alt="" tabindex="0"></div><footer class="viewer-footer"><div id="viewer-params"></div><div class="toolbar variant-controls"><span>Steps</span><div id="step-buttons" class="toolbar"></div><span>Shift</span><div id="shift-buttons" class="toolbar"></div><label class="sr-only" for="absolute-shift">Absolute shift</label><input id="absolute-shift" type="text" inputmode="decimal" placeholder="Shift" autocomplete="off"><button id="set-shift">Queue shift</button></div><div id="viewer-feedback" role="alert"></div></footer></div></dialog>
+<dialog id="recipe-dialog" class="recipe-dialog"><header class="section-heading"><h2>Prompt &amp; parameters</h2><div class="toolbar"><button id="copy-recipe">Copy</button><button id="close-recipe">Close</button></div></header><pre id="recipe-content"></pre></dialog>
+<script src="renderer.js"></script></body></html>

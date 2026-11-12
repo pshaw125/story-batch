@@ -4,7 +4,7 @@ import { shiftValue } from './arithmetic';
 import { requireThat } from './errors';
 import { JobStatus, NativeObservations } from './renderer';
 export interface ImageRecord { observations?: NativeObservations; cached?: boolean; rendererElapsedMs?: number; effectiveJob?: ImageJob; jobId: string; status: JobStatus; attempts: number; elapsedMs: number | null; output: string | null; error: string | null }
-export interface BatchReport { schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
+export interface BatchReport { editorSource?: string; schemaVersion: 1; batch: FrozenBatch; runs: RunContext[]; records: ImageRecord[] }
 export function validateJob(job: ImageJob): void {
   requireThat(job?.schemaVersion === 1 && [job.id, job.batchId, job.runId, job.title, job.filename].every(v => typeof v === 'string' && v.trim()), 'Invalid image identity.');
   requireThat(typeof job.prompt === 'string' && typeof job.source === 'string' && typeof job.notes === 'string', 'Invalid prompt snapshot.');
@@ -17,6 +17,7 @@ export function validateJob(job: ImageJob): void {
 }
 export function validateReport(value: BatchReport): void {
   requireThat(value?.schemaVersion === 1 && value.batch?.schemaVersion === 1, 'Unsupported report schema.');
+  requireThat(value.editorSource===undefined||typeof value.editorSource==='string','Invalid editor source.');
   const b = value.batch;
   requireThat([b.id, b.title, b.createdAt].every(v => typeof v === 'string' && v.trim()) && !Number.isNaN(Date.parse(b.createdAt)), 'Invalid batch identity.');
   validateContext(b.run);
@@ -45,7 +46,7 @@ export function validateReport(value: BatchReport): void {
     requireThat(r.rendererElapsedMs===undefined||Number.isFinite(r.rendererElapsedMs)&&r.rendererElapsedMs>=0,'Invalid renderer timing.');
   }
 }
-export function appendRound(report: BatchReport, round: FrozenBatch): BatchReport {
+export function appendRound(report: BatchReport, round: FrozenBatch, updateEditorSource = true): BatchReport {
   validateReport(report);
   requireThat(round.id === report.batch.id && round.title === report.batch.title, 'Round title/batch identity differs.');
   requireThat(!report.runs.some(r => r.id === round.run.id), 'Round run identifier already exists.');
@@ -53,6 +54,7 @@ export function appendRound(report: BatchReport, round: FrozenBatch): BatchRepor
   requireThat(round.jobs.every((j, i) => j.number === last + i + 1), 'Continuation numbering must follow existing jobs.');
   const result: BatchReport = {
     schemaVersion: 1,
+    editorSource: updateEditorSource ? round.jobs[0]?.source ?? report.editorSource : report.editorSource ?? report.batch.jobs.at(-1)?.source,
     batch: { ...structuredClone(report.batch), jobs: [...structuredClone(report.batch.jobs), ...structuredClone(round.jobs)] },
     runs: [...structuredClone(report.runs), structuredClone(round.run)],
     records: [...structuredClone(report.records), ...round.jobs.map(j => ({ jobId: j.id, status: 'queued' as const, attempts: 0, elapsedMs: null, output: null, error: null }))]

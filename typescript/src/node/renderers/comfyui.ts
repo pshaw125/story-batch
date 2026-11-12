@@ -156,6 +156,7 @@ export class ComfyAdapter extends Adapter {
     }
     throw new RenderError('Cancellation is not yet confirmed.','uncertain');
   }
+  override release(handle:string):void {super.release(handle);const e=this.entries.get(handle);if(e&&['completed','failed','cancelled'].includes(e.status)){this.remotes.get(handle)?.socket?.close();this.remotes.delete(handle);}}
   close():void {for(const r of this.remotes.values())r.socket?.close();}
 }
 export {workflowNodes};

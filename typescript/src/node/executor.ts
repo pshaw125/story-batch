@@ -19,13 +19,14 @@ export class BatchExecutor {
     this.busy=true;this.stopped=false;
     try{
       const report:BatchReport=structuredClone(await store.load());
-      if(report.batch.id!==batch.id||JSON.stringify(report.batch.jobs)!==JSON.stringify(batch.jobs)||report.records.some(r=>r.status!=='queued'))throw new RenderError('Execution requires a fresh, matching frozen queue; saved work never resumes implicitly.','validation');
-      for(const [index,job] of batch.jobs.entries()){
+      const selected = new Set(batch.jobs.map(j=>j.id));
+      if(report.batch.id!==batch.id||!batch.jobs.every(job=>report.batch.jobs.some(j=>JSON.stringify(j)===JSON.stringify(job))&&report.records.find(r=>r.jobId===job.id)?.status==='queued'))throw new RenderError('Execution requires fresh, matching frozen jobs; saved work never resumes implicitly.','validation');
+      for(const job of batch.jobs){
         if(this.stopped)break;
-        const record=report.records[index];this.skipped=false;this.current={renderer,handle:null};const start=performance.now();
+        const record=report.records.find(r=>r.jobId===job.id)!;this.skipped=false;this.current={renderer,handle:null};const start=performance.now();
         for(const attempt of [1,2] as const){
           if(this.stopped||this.skipped){record.status='cancelled';break;}
-          record.attempts=attempt;record.status='running';await store.save(report);
+          record.attempts=attempt;record.status='running';await store.updateRecords([record]);
           try{
             this.current.handle=await renderer.submit(job,event=>options.onEvent?.(event),{attempt});
             if(this.stopped||this.skipped)await renderer.cancel(this.current.handle);
@@ -55,16 +56,16 @@ export class BatchExecutor {
             const failure=error instanceof RenderError?error:new RenderError(String(error),'validation');
             record.error=failure.message;
             if(this.stopped||this.skipped||failure.kind==='cancelled'){record.status='cancelled';break;}
-            if(attempt===1&&failure.kind==='render')continue;
+            if(attempt===1&&failure.kind==='render'){if(this.current?.handle)renderer.release?.(this.current.handle);continue;}
             record.status=failure.kind==='uncertain'?'unknown':'failed';this.stopped=true;break;
           }
         }
         record.elapsedMs=performance.now()-start;
         if(record.status==='completed')record.error=null;
-        await store.save(report);options.onComplete?.(structuredClone(record));this.current=null;
+        await store.updateRecords([record]);options.onComplete?.(structuredClone(record));if(this.current?.handle)renderer.release?.(this.current.handle);this.current=null;
       }
-      for(const record of report.records)if(record.status==='queued')record.status='cancelled';
-      await store.save(report);return report;
+      for(const record of report.records)if(selected.has(record.jobId)&&record.status==='queued')record.status='cancelled';
+      await store.updateRecords(report.records.filter(r=>selected.has(r.jobId)));return structuredClone(await store.load());
     }finally{this.current=null;this.busy=false;}
   }
 }

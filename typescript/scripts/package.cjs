@@ -11,9 +11,9 @@ const { tmpdir } = require('node:os');
     await writeFile(join(staging,'package.json'), JSON.stringify({name:p.name,version:p.version,main:p.main,dependencies:p.dependencies}));
     await mkdir(join(staging,'node_modules'), {recursive:true});
     for(const name of Object.keys(p.dependencies)) await cp(join(__dirname,'../node_modules',name), join(staging,'node_modules',name), {recursive:true});
-    const paths = await packager({dir:staging,name:'Story Batch TypeScript Spike',out:join(__dirname,'../artifacts'),
+    const paths = await packager({dir:staging,name:'Story Batch',out:join(__dirname,'../artifacts'),
       platform:process.platform,arch:process.arch,electronVersion:require('electron/package.json').version,overwrite:true,
-      appBundleId:'local.storybatch.typescript.spike',asar:true,prune:false});
+      appBundleId:'local.storybatch.typescript',asar:true,prune:false});
     console.log(paths.join('\n'));
   } finally { await rm(staging,{recursive:true,force:true}); }
 })().catch(e => {console.error(e);process.exitCode=1;});

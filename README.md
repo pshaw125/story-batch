@@ -1,10 +1,10 @@
 # Story Batch
 
-A native macOS app for sequential, fully offline image batches through **Draw Things CLI**. It provides weighted prompt fragments and reusable fields, frozen generation queues, image inspection, step/shift variants, image-to-image refinement, and batch collections.
+Story Batch generates sequential, fully offline image batches through local renderers. It supports weighted prompt fragments, reusable fields, frozen queues, image inspection and step/shift variants. The Swift macOS reference also provides image-to-image refinement and batch collections.
 
 This repository contains the application, tests and documentation. Personal prompts, fields, batches, reference images, model/LoRA weights, renderer paths, build products and experiment archives stay local and are ignored by Git.
 
-The [TypeScript migration spike](typescript/README.md) now contains the shared core and Electron host tests. The Electron window uses synthetic outputs; native Draw Things/ComfyUI adapters now have a separate test CLI. Mac native image/cancellation/offline checks pass; Windows/ComfyUI native verification remains pending.
+The [TypeScript desktop application](typescript/README.md) provides shared editing, frozen batches, queues and image inspection with Draw Things/ComfyUI adapters. Mac native/UI checks pass; Windows workhorse verification remains pending. The Swift application below remains the reference and fallback.
 
 ## Build and run (macOS)
 
@@ -48,6 +48,7 @@ The root `.gitignore` includes only approved source directories/files and also e
 - [TypeScript migration plan](app/docs/typescript-migration-plan.md)
 - [Phase 1 progress and remaining gates](app/docs/typescript-phase-1.md)
 - [Phase 2 adapters and remaining gates](app/docs/typescript-phase-2.md)
+- [Phase 3 desktop UI and Windows acceptance](app/docs/typescript-phase-3.md)
 - [Draw Things / ComfyUI parameter compatibility](app/docs/renderer-compatibility.md)
 
-The working Swift application remains macOS-specific. The TypeScript core/host spike is separate and has been exercised on Mac; actual Windows execution and ComfyUI integration are still pending. This checkout does **not yet provide a Windows image-generation app**.
+The working Swift application remains macOS-specific. The TypeScript desktop implementation supports a local ComfyUI adapter, with Windows native-render and workhorse acceptance pending. Mac checks cannot establish Windows GPU/runtime compatibility.

@@ -1,0 +1,43 @@
+import {BrowserWindow} from 'electron';
+import {join} from 'node:path';
+import {writeFile,readFile} from 'node:fs/promises';
+import {DesktopSession} from '../node/desktop-session';
+export async function runDesktopProbe(window:BrowserWindow,desktop:DesktopSession,root:string):Promise<object>{
+  const checks=await window.webContents.executeJavaScript(`(async()=>{
+    const wait=async(test)=>{for(let i=0;i<400;i++){if(await test())return;await new Promise(r=>setTimeout(r,15));}throw new Error('UI condition timed out');};
+    const edit=(id,value)=>{const el=document.querySelector(id);el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));};
+    await wait(()=>!document.querySelector('#renderer-label').textContent.includes('No renderer'));
+    edit('#parameters','title=UI smoke;count=4;steps=2;seed=7;shift=1.75;resolution=64*64');edit('#fields','COLOR={red|blue}');edit('#prompt','A [COLOR] circle.');
+    document.querySelector('#preview').click();await wait(()=>document.querySelectorAll('.preview-card').length===4);
+    document.querySelector('#queue').click();await wait(async()=>{const s=await window.storyBatch.state();return !s.busy&&s.images.length===4;});
+    let state=await window.storyBatch.state();if(state.images.length!==4||state.images.some(i=>i.status!=='completed'))throw new Error('Fixed batch failed');
+    if(document.querySelector('#preview-notice').hidden)throw new Error('Consumed preview was not labelled');
+    const firstBatch=state.batchId;document.querySelector('.frame button').click();await wait(()=>document.querySelector('#viewer-image').src.startsWith('data:'));
+    if(getComputedStyle(document.querySelector('#viewer-image')).objectFit!=='contain')throw new Error('Viewer is not fitted');
+    document.querySelector('#recipe').click();await wait(()=>document.querySelector('#recipe-dialog').open);if(!document.querySelector('#recipe-content').textContent.includes('synthetic-renderer'))throw new Error('Recipe provenance missing');document.querySelector('#close-recipe').click();
+    document.querySelector('[data-step="4"]').click();await wait(async()=>{const s=await window.storyBatch.state();return !s.busy&&s.images.length===5;});
+    state=await window.storyBatch.state();if(state.images[4].steps!==4)throw new Error('Variant was not applied');
+    document.querySelector('#next').click();document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));if(document.querySelector('#viewer-index').textContent!=='1 / 5')throw new Error('Arrow navigation failed');document.querySelector('#close-viewer').click();
+    edit('#parameters','title=UI smoke;count=4;steps=3;seed=7,_*;shift=1.5,1.6..1.8*;resolution=64*64');edit('#prompt','A changed [COLOR] shape.');document.querySelector('#queue').click();
+    edit('#prompt','An unqueued editor change.');await wait(async()=>{const s=await window.storyBatch.state();return !s.busy&&s.images.length===9;});
+    state=await window.storyBatch.state();if(state.batchId!==firstBatch)throw new Error('Prompt changes split the batch');const recipe=await window.storyBatch.recipe(state.images[8].id);if(!recipe.job.prompt.startsWith('A changed'))throw new Error('Draft edit changed frozen work');
+    edit('#parameters','title=UI new title;count=4;steps=2;seed=9;shift=2;resolution=64*64');document.querySelector('#new-batch').click();await wait(async()=>{const s=await window.storyBatch.state();return !s.busy&&s.batchId!==firstBatch;});
+    state=await window.storyBatch.state();if(state.images.length!==4||state.images[0].number!==1)throw new Error('New batch numbering failed');
+    edit('#parameters','title=UI new title;count=4;steps=100;seed=9;shift=2;resolution=64*64');document.querySelector('#queue').click();await wait(async()=>!!(await window.storyBatch.state()).activeId);document.querySelector('#stop').click();await wait(async()=>!(await window.storyBatch.state()).busy);
+    state=await window.storyBatch.state();if(state.images.slice(4).some(i=>i.status!=='cancelled'))throw new Error('Stop left waiting work');
+    return {preview:true,fixedBatch:true,mixedContinuation:true,frozenEdits:true,newBatch:true,fittedViewer:true,recipe:true,variant:true,arrows:true,stop:true};
+  })()`);
+  const state=desktop.state();if(!state.folder)throw new Error('No saved batch');
+  const reopened=await desktop.load(state.folder);if(reopened.state.busy)throw new Error('Reload resumed saved work');
+  const file=join(root,'synthetic-metaprompt.txt');await writeFile(file,reopened.source);if((await readFile(file,'utf8'))!==reopened.source)throw new Error('Metaprompt round trip failed');
+  const before=await window.webContents.executeJavaScript(`(()=>{const input=document.querySelector('#prompt');input.focus();const before=input.value;input.setSelectionRange(input.value.length,input.value.length);document.execCommand('insertText',false,' undo-check');return before;})()`);
+  window.webContents.undo();
+  await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
+  if(await window.webContents.executeJavaScript("document.querySelector('#prompt').value")!==before)throw new Error('Native text undo failed');
+  window.webContents.redo();await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
+  if(await window.webContents.executeJavaScript("document.querySelector('#prompt').value")!==before+' undo-check')throw new Error('Native text redo failed');
+  window.webContents.undo();await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
+  const screenshot=await window.webContents.capturePage();await writeFile(join(root,'ui.png'),screenshot.toPNG());
+  if(process.env.STORYBATCH_PROBE_SCREENSHOT)await writeFile(process.env.STORYBATCH_PROBE_SCREENSHOT,screenshot.toPNG());
+  return {...checks,reload:true,metapromptFileRoundTrip:true,nativeUndoRedo:true};
+}

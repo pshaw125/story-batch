@@ -24,4 +24,6 @@ export interface Renderer {
   status(handle: string): Promise<JobStatus>;
   result(handle: string): Promise<RenderResult | null>;
   cancel(handle: string): Promise<void>;
+  /** Release completed result bytes only after durable output/report storage. Status/idempotency remain. */
+  release?(handle: string): void;
 }

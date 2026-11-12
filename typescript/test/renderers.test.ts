@@ -84,3 +84,7 @@ test('PNG validation rejects corrupt CRC and truncated pixel data',async()=>{
 test('native decode limits reject oversized requests before process submission',async()=>draw('success',async r=>{
  await assert.rejects(r.validate({...batch('draw','count=1').jobs[0],width:16384,height:8192}),/64-megapixel/);
 }));
+test('durable completion can release adapter bytes without rerendering an idempotent job',async()=>draw('success',async(r,root)=>{
+ const job=batch('draw','count=1').jobs[0],handle=await r.submit(job,()=>{});assert.equal(await wait(r,handle),'completed');assert.ok((await r.result(handle))!.bytes.length>0);
+ r.release(handle);assert.equal(await r.result(handle),null);assert.equal(await r.status(handle),'completed');assert.equal(await r.submit(job,()=>{}),handle);assert.equal((await readdir(join(root,'attempts'))).length,1);
+}));

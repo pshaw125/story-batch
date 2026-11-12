@@ -84,7 +84,7 @@ export class DrawThingsAdapter extends Adapter {
               reportedGenerationMs:log.match(/Total generation time \(including model loading\):\s*([0-9.]+)\s*s/)?.[1]===undefined?undefined:Number(log.match(/Total generation time \(including model loading\):\s*([0-9.]+)\s*s/)![1])*1000
             }};this.transition(e,'completed');
           }
-        } catch(error){this.failed(e,error);}finally{resolve();}
+        } catch(error){this.failed(e,error);}finally{this.processes.delete(e.handle);resolve();}
       });
     });
     this.transition(e,'running');

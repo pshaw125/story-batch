@@ -52,6 +52,7 @@ export abstract class Adapter implements Renderer {
     return e.status;
   }
   async result(handle:string):Promise<RenderResult|null> {const e=this.entries.get(handle);if(e)await this.status(handle);return e?.result?structuredClone(e.result):null;}
+  release(handle:string):void {const e=this.entries.get(handle);if(e&&['completed','failed','cancelled'].includes(e.status))e.result=null;}
   async failure(handle:string):Promise<RenderError|null> {return this.entries.get(handle)?.error??null;}
   async cancel(handle:string):Promise<void> {
     const e=this.entries.get(handle);if(!e||['completed','cancelled','failed'].includes(e.status))return;
