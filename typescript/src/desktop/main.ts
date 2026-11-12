@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {DesktopSession} from '../node/desktop-session';
 import {configuredRuntime,syntheticRuntime} from '../node/runtime';
 import {MetapromptFiles} from '../node/metaprompt-files';
+import {NativeFullscreen} from './fullscreen';
 import {hostProbe} from '../node/host-probe';
 import {inspectSwiftBatch} from '../node/legacy-import';
 import type {LoRA} from '../core/recipes';
@@ -56,6 +57,7 @@ app.whenReady().then(async()=>{
   });
   window=new BrowserWindow({width:1400,height:960,minWidth:850,minHeight:620,show:!probeMode,title:'Story Batch',
     webPreferences:{preload:join(__dirname,'preload.js'),sandbox:true,contextIsolation:true,nodeIntegration:false}});
+  const fullscreen=new NativeFullscreen(window,flag=>{if(window&&!window.isDestroyed()&&!window.webContents.isDestroyed())window.webContents.send('fullscreen',flag);});
   window.on('close',event=>{if(readyToQuit)return;event.preventDefault();if(closing)return;closing=true;void shutdown().then(()=>{readyToQuit=true;window?.close();}).catch(error=>{closing=false;dialog.showErrorBox('Could not close safely',String(error));});});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
   desktop.subscribe(state=>{if(window&&!window.isDestroyed())window.webContents.send('state',state);});
@@ -74,6 +76,8 @@ app.whenReady().then(async()=>{
   handle('inspect-import',async()=>{if(desktop!.state().busy)throw new Error('Stop the active batch before importing.');const selected=await dialog.showOpenDialog(window!,{title:'Choose Swift batch to copy',properties:['openDirectory']});if(selected.canceled)return null;importChoice=await inspectSwiftBatch(selected.filePaths[0]);importSelections=undefined;importFavorites=undefined;return importChoice;});
   handle('choose-import-part',async kind=>{if(!importChoice||!['selections','favorites'].includes(String(kind)))throw new Error('Choose a Swift batch first.');const selected=await dialog.showOpenDialog(window!,kind==='selections'?{title:'Choose Swift image-selections.json',properties:['openFile'],filters:[{name:'Selections',extensions:['json']}]}:{title:'Choose Swift _favorites folder',properties:['openDirectory']});if(selected.canceled)return null;const path=selected.filePaths[0];if(kind==='selections')importSelections=path;else importFavorites=path;return path;});
   handle('import-swift',mapping=>{if(!importChoice||!mapping||typeof mapping!=='object'||(mapping as {from:string}).from!==importChoice.originalFolder||(mapping as {to:string}).to!==importChoice.folder)throw new Error('Confirm the selected batch path mapping.');return desktop!.importSwift({folder:importChoice.folder,mapping:mapping as {from:string;to:string},selectionsFile:importSelections,favoritesFolder:importFavorites});});
+  handle('fullscreen',flag=>{if(typeof flag!=='boolean')throw new Error('Invalid fullscreen request.');return fullscreen.set(flag);});
+  handle('fullscreen-state',()=>fullscreen.state());
   handle('state',()=>desktop!.state());
   handle('preview',text=>desktop!.preview(source(text)));
   handle('queue',(text,newBatch)=>{if(typeof newBatch!=='boolean')throw new Error('Invalid batch mode.');return desktop!.queue(source(text),newBatch);});
@@ -136,6 +140,7 @@ app.whenReady().then(async()=>{
   ]));
   window.webContents.on('render-process-gone',(_event,details)=>{if(probeMode){console.error(details);app.exit(1);}});
   await window.loadFile(join(__dirname,'index.html'));
+  window.webContents.setZoomMode('disabled');await window.webContents.setVisualZoomLevelLimits(1,1);
   if(startupError)window.webContents.send('command','error:'+startupError);
   if(probeMode){
     const checks=nativeSmoke?await (await import('./probe-native')).runNativeDesktopProbe(window,desktop):await (await import('./probe')).runDesktopProbe(window,desktop,probeDirectory!);console.log(JSON.stringify({ok:true,checks,host:await hostProbe()}));

@@ -40,6 +40,24 @@ The 📌 **Shortlist**, ⭐ **Favorite**, and 🚫 **Reject** image actions have
 
 **Favorites** reads the selected output root's `_favorites/` directory. Favoriting copies the image plus a recipe/provenance sidecar. Startup, entering the view, or **Refresh Favorites** rescans the directory; external image additions/removals are supported. Sidecar hashes must match the copied artwork. Files without usable sidecars show unknown parameters and have no recipe/variant controls. A cross-batch favorite offers **Open source batch** before batch-specific actions; its copied image and recipe remain readable if the original folder is unavailable. Unfavoriting moves the copy into `_favorites/.removed/`; the batch original is preserved. The output root selects the Favorites library; an open batch can have a different physical parent.
 
+## Image inspection controls
+
+| Action | Controls |
+| --- | --- |
+| Zoom around the pointer | Ctrl+wheel or Alt/Option+wheel; trackpad pinch uses the same Ctrl-wheel gesture path |
+| Pan | Left drag, middle drag, or Space+left drag |
+| Vertical / horizontal pan | Wheel / Shift+wheel |
+| Zoom at the view center | `+` or `=` / `-`, including **numpad Add/Subtract**; visible +/− buttons |
+| Reset zoom and pan to fit | `0` or **Fit** |
+| Image-only fullscreen | `F` or **Fullscreen**; `F` or Escape returns to the viewer |
+| Previous / next image | Left/right arrows or buttons, without wrapping |
+
+Zoom ranges from fit to 16× fit; displayed percentages are relative to fit, not native pixel size. The image keeps its aspect ratio. Panning stays bounded; an axis that still fits remains centered. Pointer anchoring applies within these bounds. Mouse capture keeps a drag working outside the image area until release, and blur/cancel clears the drag.
+
+Same-seed images retain the current normalized inspection point and zoom, including after changing sort order. A new seed resets to fit. While zoomed, crossing to a known different seed requires a second fresh press/click in that direction; held-key repeats cannot confirm. An amber notice appears by the navigation area, or as the sole text overlay in fullscreen. Fit clears the pending confirmation. Returning to an earlier seed starts at fit; there is no per-seed viewport history. Unknown-seed images reset on identity changes.
+
+Viewer shortcuts yield to text inputs, selectors and the recipe dialog. Image zoom does not zoom the application UI. The [Phase 6 viewer evidence](../app/docs/typescript-phase-6.md) distinguishes automated mouse/fullscreen checks from physical-device and Windows checks.
+
 ## Images, adapters and Swift import
 
 **Image-to-image & LoRAs** contains render tools for future jobs. **Choose canvas…** opens a local image; **Use as canvas** in the viewer uses an existing image/Favorite and its resolved source prompt. No model or adapter is downloaded by the app.
@@ -76,7 +94,7 @@ npm run host:probe
 npm run package
 ```
 
-Tests use temporary synthetic files and fake process/HTTP/WebSocket backends. The hidden desktop probe covers editing/undo, preview, frozen batches, continuation, native-setup copies, image-to-image append/replace/frozen options, legacy inspection, variants, viewer navigation/sort identity, queue editing, Stop After, collections, external Favorites, search highlights, and durable draft/page restore without resuming work. It does not require a model. CI configures Windows/macOS runs; recorded evidence distinguishes configured checks from executed checks.
+Tests use temporary synthetic files and fake process/HTTP/WebSocket backends. The hidden desktop probe covers editing/undo, preview, frozen batches, continuation, native-setup copies, image-to-image append/replace/frozen options, legacy inspection, variants, viewer navigation/sort identity, queue editing, Stop After, collections, external Favorites, search highlights, and durable draft/page restore without resuming work. It does not require a model. Set `STORYBATCH_PROBE_NATIVE_FULLSCREEN=1` when running the host probe to include visible native fullscreen checks; the default probe stays hidden. CI configures Windows/macOS runs; recorded evidence distinguishes configured checks from executed checks.
 
 Packaging creates an unpacked native application under ignored `artifacts/` using compiled source, a minimal manifest, runtime libraries and Electron. Prompts, fields, local config, outputs, models and test fixtures are excluded. Build on the destination OS/architecture. Electron distribution procurement can be needed during packaging; ordinary application launch cannot download it. Signing/installers are release work.
 

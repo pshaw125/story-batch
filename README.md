@@ -51,6 +51,7 @@ The root `.gitignore` includes only approved source directories/files and also e
 - [Phase 3 desktop UI and Windows acceptance](app/docs/typescript-phase-3.md)
 - [Phase 4 daily iteration and collections](app/docs/typescript-phase-4.md)
 - [Phase 5 import and render tools](app/docs/typescript-phase-5.md)
+- [Phase 6 viewer controls](app/docs/typescript-phase-6.md)
 - [Draw Things / ComfyUI parameter compatibility](app/docs/renderer-compatibility.md)
 
 The working Swift application remains macOS-specific. The TypeScript desktop implementation supports a local ComfyUI adapter, with Windows native-render and workhorse acceptance pending. Mac checks cannot establish Windows GPU/runtime compatibility.

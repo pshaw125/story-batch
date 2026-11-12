@@ -1,5 +1,8 @@
 import type { DesktopState, PreviewResult, RecipeSnapshot, VariantChange, DraftSnapshot, SwiftImportPreview } from '../core/desktop';
 export interface DesktopBridge {
+  fullscreen(flag:boolean):Promise<boolean>;
+  fullscreenState():Promise<boolean>;
+  onFullscreen(callback:(flag:boolean)=>void):()=>void;
   chooseCanvas():Promise<DesktopState|null>;
   useCanvas(id:string):Promise<DesktopState>;
   clearCanvas():Promise<DesktopState>;

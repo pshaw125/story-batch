@@ -32,6 +32,7 @@ export async function runDesktopProbe(window:BrowserWindow,desktop:DesktopSessio
   const file=join(root,'synthetic-metaprompt.txt');await writeFile(file,reopened.source);if((await readFile(file,'utf8'))!==reopened.source)throw new Error('Metaprompt round trip failed');
   const iteration=await (await import('./probe-iteration')).iterationProbe(window,desktop,root);
   const tools=await (await import('./probe-tools')).toolsProbe(window,desktop,root);
+  const inspection=await (await import('./probe-inspection')).inspectionProbe(window);
   const before=await window.webContents.executeJavaScript(`(()=>{const input=document.querySelector('#prompt');input.focus();const before=input.value;input.setSelectionRange(input.value.length,input.value.length);document.execCommand('insertText',false,' undo-check');return before;})()`);
   window.webContents.undo();
   await window.webContents.executeJavaScript('new Promise(r=>setTimeout(r,100))');
@@ -42,5 +43,5 @@ export async function runDesktopProbe(window:BrowserWindow,desktop:DesktopSessio
   if(process.env.STORYBATCH_PROBE_SCREENSHOT)await window.webContents.executeJavaScript(`(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',metaKey:true,bubbles:true}));const input=document.querySelector('#find-input');input.value='unfinished';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   const screenshot=await window.webContents.capturePage();await writeFile(join(root,'ui.png'),screenshot.toPNG());
   if(process.env.STORYBATCH_PROBE_SCREENSHOT)await writeFile(process.env.STORYBATCH_PROBE_SCREENSHOT,screenshot.toPNG());
-  return {...checks,...iteration,...tools,reload:true,metapromptFileRoundTrip:true,nativeUndoRedo:true};
+  return {...checks,...iteration,...tools,...inspection,reload:true,metapromptFileRoundTrip:true,nativeUndoRedo:true};
 }
