@@ -20,6 +20,21 @@ Choose **Renderer configuration…** and select a local config file based on `re
 
 **Use synthetic** selects dimension-correct color swatches for testing editing/queue/viewer flows without a GPU. The renderer label and report framework identify synthetic output. It is not image inference or a quality/performance benchmark.
 
+## Windows setup
+
+Install Node 22.12+ and run these commands in PowerShell from the repository's `typescript/` directory:
+
+```powershell
+npm ci
+npm run setup:electron
+npm run host:probe
+npm start
+```
+
+Use `npm.cmd` instead of `npm` if PowerShell's execution policy blocks `npm.ps1`. The host probe checks desktop integration without a model; select **Use synthetic** to check the UI before configuring real rendering.
+
+For image generation, install a dedicated local ComfyUI instance and the required model assets, start its loopback service, and select **Renderer configuration…** with a local configuration based on [`comfyui.example.json`](comfyui.example.json). Dependency and model procurement can require networking; rendering must work offline afterward. Native Windows GPU compatibility, image quality and offline rendering require verification on the target machine.
+
 ## Edit and generate
 
 - **Parameters** is one semicolon-delimited line. **Prompt** contains illustration text and field references; **Fields** contains raw multiline `NAME=value` definitions. The [usage reference](../app/README.md#metaprompt-files) describes the language and defaults. These panels save as the portable header/body/`%%FIELDS%%` format.
