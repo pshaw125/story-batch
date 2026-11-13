@@ -35,7 +35,7 @@ Environment: macOS arm64, Darwin 25.6.0, Node 24.22.2, TypeScript 5.9.3, Electro
 | Packaged Mac application | Build, the same isolated desktop/host probe, visual inspection and source-only package inclusion audit passed |
 | Physical trackpads / Windows | Pending owner checks; Windows currently has no trackpad. Mouse/numpad controls are the primary Windows path. Synthetic gesture events do not establish physical trackpad behavior |
 
-The default host probe stays hidden; set `STORYBATCH_PROBE_NATIVE_FULLSCREEN=1` to opt into native fullscreen checks. The isolated native-fullscreen probe briefly activates its own temporary window with synthetic images; it does not restart the user's application or load private prompts/images. macOS requires an active foreground application for this probe's native transition. Earlier inactive-window attempts correctly failed the confirmation deadline rather than reporting fullscreen success.
+The host probe briefly shows and focuses its temporary synthetic window for trusted mouse-input checks: Electron requires a focused BrowserWindow for `sendInputEvent`. It waits for image zoom to change rather than relying on a fixed input-delivery delay, and reports focus, visibility and zoom values on failure. Set `STORYBATCH_PROBE_NATIVE_FULLSCREEN=1` to opt into native fullscreen checks. The isolated native-fullscreen probe briefly activates its own temporary window with synthetic images; it does not restart the user's application or load private prompts/images. macOS requires an active foreground application for this probe's native transition. Earlier inactive-window attempts correctly failed the confirmation deadline rather than reporting fullscreen success.
 
 ## Remaining Phase 6 gates
 

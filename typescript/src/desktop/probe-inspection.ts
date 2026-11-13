@@ -20,15 +20,24 @@ export async function inspectionProbe(window:BrowserWindow):Promise<object>{
  for(let i=0;i<10;i++)key('-');if(zoom()!==1)throw new Error('Zoom went below fit');key('ArrowLeft');key('ArrowLeft');const edge=$('#viewer-index').textContent;key('ArrowLeft');if($('#viewer-index').textContent!==edge)throw new Error('Navigation wrapped');
  for(let i=0;i<6;i++)key('+');pane.focus();return {numpadZoom:true,regularZoom:true,textFocus:true,ctrlAltWheel:true,cursorAnchor:true,wheelPan:true,sameSeedRetention:true,seedGuard:true,repeatGuard:true,fitFloor:true,sortRetention:true,noSeedHistory:true};
  })()`);
- // Mouse injection targets this WebContents, never the desktop/global pointer.
+ // Native input requires a visible, focused BrowserWindow, including on Windows.
+ // This temporary synthetic probe targets only its WebContents, never the global pointer.
+ window.show();app.focus({steal:true});window.focus();window.webContents.focus();
+ const deadline=Date.now()+4000;
+ while(!window.isFocused()){
+  if(Date.now()>=deadline)throw new Error('Inspection probe window did not receive native focus');
+  await new Promise(r=>setTimeout(r,20));
+ }
+ await window.webContents.executeJavaScript("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  const position=await window.webContents.executeJavaScript(`(()=>{const r=document.querySelector('.viewer-image-pane').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),center:document.querySelector('.viewer-image-pane').dataset.centerX};})()`);
  window.webContents.focus();
  for(const modifier of ['control','alt'] as const){
   const before=await window.webContents.executeJavaScript("Number(document.querySelector('.viewer-image-pane').dataset.zoom)");
   window.webContents.sendInputEvent({type:'mouseWheel',x:position.x,y:position.y,deltaX:0,deltaY:80,modifiers:[modifier]});
-  await new Promise(r=>setTimeout(r,100));
+  const wheelDeadline=Date.now()+4000;
+  while(await window.webContents.executeJavaScript("Number(document.querySelector('.viewer-image-pane').dataset.zoom)")===before&&Date.now()<wheelDeadline)await new Promise(r=>setTimeout(r,20));
   const after=await window.webContents.executeJavaScript("Number(document.querySelector('.viewer-image-pane').dataset.zoom)");
-  if(before===after||window.webContents.getZoomFactor()!==1)throw new Error('Native '+modifier+' wheel did not zoom only the image');
+  if(before===after||window.webContents.getZoomFactor()!==1)throw new Error('Native '+modifier+' wheel did not zoom only the image: '+JSON.stringify({before,after,pageZoom:window.webContents.getZoomFactor(),focused:window.isFocused(),visible:window.isVisible()}));
  }
  const beforeDrag=await window.webContents.executeJavaScript("document.querySelector('.viewer-image-pane').dataset.centerX");
  window.webContents.sendInputEvent({type:'mouseMove',x:position.x,y:position.y});
@@ -40,7 +49,7 @@ export async function inspectionProbe(window:BrowserWindow):Promise<object>{
  if(dragged===beforeDrag)throw new Error('Mouse drag did not pan');
  window.webContents.sendInputEvent({type:'mouseDown',x:position.x,y:position.y,button:'middle',clickCount:1});window.webContents.sendInputEvent({type:'mouseMove',x:position.x-35,y:position.y-20});window.webContents.sendInputEvent({type:'mouseUp',x:position.x-35,y:position.y-20,button:'middle',clickCount:1});await new Promise(r=>setTimeout(r,100));
  const middle=await window.webContents.executeJavaScript("({center:document.querySelector('.viewer-image-pane').dataset.centerX,dragging:document.querySelector('.viewer-image-pane').classList.contains('dragging')})");if(middle.center===dragged||middle.dragging)throw new Error('Middle drag or pointer release failed');
- if(process.env.STORYBATCH_PROBE_NATIVE_FULLSCREEN!=='1'){await window.webContents.executeJavaScript("document.querySelector('#close-viewer').click()");return {...checks,mouseDrag:true,middleDrag:true,nativeCtrlAltWheel:true,nativeFullscreen:'not-requested'};}
+ if(process.env.STORYBATCH_PROBE_NATIVE_FULLSCREEN!=='1'){await window.webContents.executeJavaScript("document.querySelector('#close-viewer').click()");window.hide();return {...checks,mouseDrag:true,middleDrag:true,nativeCtrlAltWheel:true,nativeFullscreen:'not-requested'};}
  // Native fullscreen requires a visible window on macOS. This isolated test window
  // has temporary state and synthetic images; no user application is restarted.
  window.show();app.focus({steal:true});window.focus();await new Promise(r=>setTimeout(r,300));
